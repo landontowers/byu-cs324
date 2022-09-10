@@ -57,8 +57,7 @@ is opened.
  6. Which section number(s) contain a man page for `socket`?
  7. Which `socket` option "Returns a value indicating whether or not this
     socket has been marked to accept connections with `listen(2)`"?
- 8. How many man pages (in any section) contain keyword references to
-    `getaddrinfo`?
+ 8. How many short manual page descriptions contain the keyword `getaddrinfo`?
  9. According to the "DESCRIPTION" section of the man page for `string`, the
     functions described in that man page are used to perform operations on
     strings that are ________________. (fill in the blank)
