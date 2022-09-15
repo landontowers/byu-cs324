@@ -1,0 +1,20 @@
+1.  exec.c prints its pid, sleeps for 30 seconds, then executes a given program.
+2.  The final printf statement will be executed on the condition that an argument is passed in.
+3.  ./exec /bin/cat
+    Program "./exec" has pid 1081850. Sleeping.
+    Running exec of "/bin/cat"
+4.  ps -p 1081850 -o user,pid,ppid,state,ucmd
+    USER         PID    PPID S CMD
+    latowers 1081850 1074607 S exec
+    ps -p 1081850 -o user,pid,ppid,state,ucmd
+    USER         PID    PPID S CMD
+    latowers 1081850 1074607 S cat
+5.  The user, pid, ppid, and state all remain the same. The only change is the command being executed, which changed from exec to cat, which changed occured when execve was called.
+6.  Program "./exec" has pid 1083415. Sleeping.
+    Running exec of "/does-not-exist"
+    End of program "./exec".
+    The program attempts to execute the nonexistant program, but does not return an error when it fails, allowing the parent program to continue.
+7.  The program creates a fork, then prints its pid. Then, depending on whether the parent or fork is being executed, a certain path of code will be run before both executing a final section of code.
+8.  Parent: A, C
+    Child: A, B
+9.  
