@@ -17,4 +17,39 @@
 7.  The program creates a fork, then prints its pid. Then, depending on whether the parent or fork is being executed, a certain path of code will be run before both executing a final section of code.
 8.  Parent: A, C
     Child: A, B
-9.  
+9.  ps -p 1620901,1620902 -o user,pid,ppid,state,ucmd --forest
+    USER         PID    PPID S CMD
+    latowers 1620901 1610258 S fork
+    latowers 1620902 1620901 S  \_ fork
+    ps -p 1620901,1620902 -o user,pid,ppid,state,ucmd --forest
+    USER         PID    PPID S CMD
+    latowers 1620901 1610258 S fork
+    latowers 1620902 1620901 Z  \_ fork <defunct>
+10. The difference is that the child process is now defunct. After section B, the child process calls exit(0), which exits the process. But since the parent process has yet to exit, it becomes a zombie/defunct.
+11. int status; wait(&status);
+    This should go between the two sleeps in section C.
+12. ps -p 1625705,1625706 -o user,pid,ppid,state,ucmd --forest
+    USER         PID    PPID S CMD
+    latowers 1625705 1610258 S fork
+    latowers 1625706 1625705 S  \_ fork
+    ps -p 1625705,1625706 -o user,pid,ppid,state,ucmd --forest
+    USER         PID    PPID S CMD
+    latowers 1625705 1610258 S fork
+13. The child process has been exited and reaped, so it no longer shows up.
+14. ps -p 1625705,1625706 -o user,pid,ppid,state,ucmd --forest
+    USER         PID    PPID S CMD
+    latowers 1626806 1610258 S fork
+    latowers 1626807 1626806 S  \_ fork
+    ps -p 1625705,1625706 -o user,pid,ppid,state,ucmd --forest
+    USER         PID    PPID S CMD
+    latowers 1626807       1 S fork
+15. The parent process has been exited and reaped while the child has not, leaving the init process with a PID of 1 to reap the child process.
+16. BEFORE FORK
+    SECTION A
+    SECTION C
+    SECTION A
+    SECTION B
+17. Both the parent and child processes write to the file.
+18. 
+19. 
+20. 
