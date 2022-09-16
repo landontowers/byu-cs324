@@ -15,8 +15,11 @@ int main(int argc, char *argv[]) {
 	fprintf(file, "BEFORE FORK\n");
 	fflush(file);
 
-	int p[2];
-	pipe(p);
+	int pipefd[2];
+	if (pipe(pipefd) == -1) {
+		perror("pipe");
+		exit(EXIT_FAILURE);
+	}
 
 	if ((pid = fork()) < 0) {
 		fprintf(stderr, "Could not fork()");
@@ -36,13 +39,30 @@ int main(int argc, char *argv[]) {
 		fprintf(file, "SECTION B\n");
 		fflush(file);
 
-		// close(p[1]);
-		// write(p[2], "hello from Section B\n", strlen("hello from Section B\n"));
+		close(pipefd[0]);
+		write(pipefd[1], "hello from Section B\n", strlen("hello from Section B\n")+1);
 
 		printf("Section B\n");
 		// sleep(30);
 		// sleep(30);
 		// printf("Section B done sleeping\n");
+
+		// EXEC.C BEGIN
+		char *newenviron[] = { NULL };
+
+		printf("Program \"%s\" has pid %d. Sleeping.\n", argv[0], getpid());
+		// sleep(30);
+
+		if (argc <= 1) {
+			printf("No program to exec.  Exiting...\n");
+			exit(0);
+		}
+
+		printf("Running exec of \"%s\"\n", argv[1]);
+		dup2(fileno(file), 1);
+		execve(argv[1], &argv[1], newenviron);
+		printf("End of program \"%s\".\n", argv[0]);
+		//EXEC.C END
 
 		exit(0);
 		
@@ -51,16 +71,14 @@ int main(int argc, char *argv[]) {
 		/* BEGIN SECTION C */
 		fprintf(file, "SECTION C\n");
 		fflush(file);
-
-		close(p[2]);
-		char *c;
-		int bytesRead = read(p[1], c, 100);
-		printf("bytes read: %c\n", bytesRead);
-		printf("p[1]: %c\n", p[1]);
-		// c[bytesRead] = '\0';
-		// printf("%s", c);
-
 		printf("Section C\n");
+
+		close(pipefd[1]);
+		char c[100];
+		int bytesRead = read(pipefd[0], c, 100);
+		c[bytesRead] = '\0';
+		printf("%s", c);
+
 		// sleep(30);
 		int status; wait(&status);
 		// sleep(30);

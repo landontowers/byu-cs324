@@ -1,22 +1,30 @@
 1.  exec.c prints its pid, sleeps for 30 seconds, then executes a given program.
+
 2.  The final printf statement will be executed on the condition that an argument is passed in.
+
 3.  ./exec /bin/cat
     Program "./exec" has pid 1081850. Sleeping.
     Running exec of "/bin/cat"
+
 4.  ps -p 1081850 -o user,pid,ppid,state,ucmd
     USER         PID    PPID S CMD
     latowers 1081850 1074607 S exec
     ps -p 1081850 -o user,pid,ppid,state,ucmd
     USER         PID    PPID S CMD
     latowers 1081850 1074607 S cat
+
 5.  The user, pid, ppid, and state all remain the same. The only change is the command being executed, which changed from exec to cat, which changed occured when execve was called.
+
 6.  Program "./exec" has pid 1083415. Sleeping.
     Running exec of "/does-not-exist"
     End of program "./exec".
     The program attempts to execute the nonexistant program, but does not return an error when it fails, allowing the parent program to continue.
+
 7.  The program creates a fork, then prints its pid. Then, depending on whether the parent or fork is being executed, a certain path of code will be run before both executing a final section of code.
+
 8.  Parent: A, C
     Child: A, B
+
 9.  ps -p 1620901,1620902 -o user,pid,ppid,state,ucmd --forest
     USER         PID    PPID S CMD
     latowers 1620901 1610258 S fork
@@ -25,9 +33,12 @@
     USER         PID    PPID S CMD
     latowers 1620901 1610258 S fork
     latowers 1620902 1620901 Z  \_ fork <defunct>
+
 10. The difference is that the child process is now defunct. After section B, the child process calls exit(0), which exits the process. But since the parent process has yet to exit, it becomes a zombie/defunct.
+
 11. int status; wait(&status);
     This should go between the two sleeps in section C.
+
 12. ps -p 1625705,1625706 -o user,pid,ppid,state,ucmd --forest
     USER         PID    PPID S CMD
     latowers 1625705 1610258 S fork
@@ -35,7 +46,9 @@
     ps -p 1625705,1625706 -o user,pid,ppid,state,ucmd --forest
     USER         PID    PPID S CMD
     latowers 1625705 1610258 S fork
+
 13. The child process has been exited and reaped, so it no longer shows up.
+
 14. ps -p 1625705,1625706 -o user,pid,ppid,state,ucmd --forest
     USER         PID    PPID S CMD
     latowers 1626806 1610258 S fork
@@ -43,13 +56,46 @@
     ps -p 1625705,1625706 -o user,pid,ppid,state,ucmd --forest
     USER         PID    PPID S CMD
     latowers 1626807       1 S fork
+
 15. The parent process has been exited and reaped while the child has not, leaving the init process with a PID of 1 to reap the child process.
+
 16. BEFORE FORK
     SECTION A
     SECTION C
     SECTION A
     SECTION B
+
 17. Both the parent and child processes write to the file.
-18. 
-19. 
-20. 
+
+18. Starting program; process has pid 2573984
+    Section A;  pid 2573984
+    Section A;  pid 2573986
+    Section C
+    Section B
+    hello from Section B
+
+19. Starting program; process has pid 2574667
+    Section A;  pid 2574667
+    Section A;  pid 2574669
+    Section C
+    Section B
+    Program "./fork" has pid 2574669. Sleeping.
+    hello from Section B
+    Running exec of "/bin/cat"
+    foobar
+
+20. Starting program; process has pid 2580257
+    Section A;  pid 2580257
+    Section C
+    Section A;  pid 2580259
+    Section B
+    Program "./fork" has pid 2580259. Sleeping.
+    Running exec of "/bin/cat"
+    hello from Section B
+
+    BEFORE FORK
+    SECTION A
+    SECTION C
+    SECTION A
+    SECTION B
+    foobar
