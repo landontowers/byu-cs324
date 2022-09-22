@@ -16,6 +16,7 @@
 /* Misc manifest constants */
 #define MAXLINE    1024   /* max line size */
 #define MAXARGS     128   /* max args on a command line */
+#define MAXCMDS      20   /* max commands on a command line */
 
 /* Global variables */
 extern char **environ;      /* defined in libc */
@@ -71,22 +72,22 @@ int main(int argc, char **argv)
     /* Execute the shell's read/eval loop */
     while (1) {
 
-	/* Read command line */
-	if (emit_prompt) {
-	    printf("%s", prompt);
-	    fflush(stdout);
-	}
-	if ((fgets(cmdline, MAXLINE, stdin) == NULL) && ferror(stdin))
-	    app_error("fgets error");
-	if (feof(stdin)) { /* End of file (ctrl-d) */
-	    fflush(stdout);
-	    exit(0);
-	}
+        /* Read command line */
+        if (emit_prompt) {
+            printf("%s", prompt);
+            fflush(stdout);
+        }
+        if ((fgets(cmdline, MAXLINE, stdin) == NULL) && ferror(stdin))
+            app_error("fgets error");
+        if (feof(stdin)) { /* End of file (ctrl-d) */
+            fflush(stdout);
+            exit(0);
+        }
 
-	/* Evaluate the command line */
-	eval(cmdline);
-	fflush(stdout);
-	fflush(stdout);
+        /* Evaluate the command line */
+        eval(cmdline);
+        fflush(stdout);
+        fflush(stdout);
     } 
 
     exit(0); /* control never reaches here */
@@ -106,6 +107,49 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
+    char* argv[MAXARGS];
+    memset(argv, 0, sizeof(argv));
+    int lineRes = parseline(cmdline,argv);
+
+    // for (int i=0; i<sizeof(*argv); i++) {
+    //     printf("%s \n", argv[i]);
+    // }
+
+    builtin_cmd(argv);
+
+    int cmds[MAXCMDS];
+    int stdin_redir[MAXCMDS];
+    int stdout_redir[MAXCMDS];
+
+    int argsRes = parseargs(argv, cmds, stdin_redir, stdout_redir);
+
+    // for (int i=0; i<sizeof(*argv); i++) {
+    //     printf("%s \n", argv[i]);
+    // }
+
+    int forkRes, c = 0;
+    if ((forkRes = fork()) == 0) {
+        // Check the command for any input or output redirection, and perform that redirection.
+
+        // Close any open file descriptors that will not be used by the child process. This includes file descriptors that were created as part of input/output redirection.
+
+        // Run the executable in the context of the child process using execve().
+        if (execve(argv[c], argv, environ) < 0) {
+            printf("%s: Command not found.\n", argv[c]);
+        }
+        else {
+            printf("Command: %s\n", argv[c]);
+        }
+
+        exit(0);
+    }
+    else {
+        // Put the child process in its own process group, for which the group ID is the same as the process ID of the child process. You can use setpgid(pid, pid), where pid is the process ID of the child process. This makes it so that any signals sent to the group ID of the child process do not also go to the shell itself, which would effectively terminate the shell!
+        
+        // wait for the child process to complete.
+        // waitpid(forkRes);
+    }
+    
     return;
 }
 
@@ -233,6 +277,8 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
+    if(strcmp(argv[0],"quit") == 0)  
+        exit(0);
     return 0;     /* not a builtin command */
 }
 
