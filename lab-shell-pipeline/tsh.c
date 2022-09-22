@@ -109,7 +109,7 @@ void eval(char *cmdline)
 {
     char* argv[MAXARGS];
     memset(argv, 0, sizeof(argv));
-    int lineRes = parseline(cmdline,argv);
+    parseline(cmdline,argv);
 
     // for (int i=0; i<sizeof(*argv); i++) {
     //     printf("%s \n", argv[i]);
@@ -121,33 +121,52 @@ void eval(char *cmdline)
     int stdin_redir[MAXCMDS];
     int stdout_redir[MAXCMDS];
 
-    int argsRes = parseargs(argv, cmds, stdin_redir, stdout_redir);
+    parseargs(argv, cmds, stdin_redir, stdout_redir);
 
     // for (int i=0; i<sizeof(*argv); i++) {
     //     printf("%s \n", argv[i]);
     // }
 
-    int forkRes, c = 0;
-    if ((forkRes = fork()) == 0) {
-        // Check the command for any input or output redirection, and perform that redirection.
+    // /bin/cat trace01.txt > test.txt
 
+    int childPid, c = 0;
+    if ((childPid = fork()) == 0) {
+        // Check the command for any input or output redirection, and perform that redirection.
         // Close any open file descriptors that will not be used by the child process. This includes file descriptors that were created as part of input/output redirection.
+        if (argv[c]) {
+            if (stdin_redir[c] > 1) {
+                FILE *file = fopen(argv[stdin_redir[c]], "r");
+                if (dup2(fileno(file), 0) < 0) {
+                    printf("dup2 in stdin_redir failed");
+                }
+                close(fileno(file));
+            }
+            if (stdout_redir[c] > 1) {
+                FILE *file = fopen(argv[stdout_redir[c]], "w");
+                if (dup2(fileno(file), 1) < 0) {
+                    printf("dup2 in stdout_redir failed");
+                }
+                close(fileno(file));
+            }
+        }
 
         // Run the executable in the context of the child process using execve().
         if (execve(argv[c], argv, environ) < 0) {
             printf("%s: Command not found.\n", argv[c]);
-        }
-        else {
-            printf("Command: %s\n", argv[c]);
         }
 
         exit(0);
     }
     else {
         // Put the child process in its own process group, for which the group ID is the same as the process ID of the child process. You can use setpgid(pid, pid), where pid is the process ID of the child process. This makes it so that any signals sent to the group ID of the child process do not also go to the shell itself, which would effectively terminate the shell!
-        
+        if (setpgid(childPid, childPid) < 0) {
+            printf("setpgid failed");
+        }
         // wait for the child process to complete.
-        // waitpid(forkRes);
+        int status;
+        if (waitpid(childPid, &status, 0) < 0) {
+            printf("waitpid failed");
+        }
     }
     
     return;
