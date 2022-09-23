@@ -107,33 +107,43 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
+    FILE *debug = fopen("debug.txt", "w+");
+
     char* argv[MAXARGS];
     memset(argv, 0, sizeof(argv));
     parseline(cmdline,argv);
-
-    // for (int i=0; i<sizeof(*argv); i++) {
-    //     printf("%s \n", argv[i]);
-    // }
 
     builtin_cmd(argv);
 
     int cmds[MAXCMDS];
     int stdin_redir[MAXCMDS];
     int stdout_redir[MAXCMDS];
-
+    memset(cmds, 0, sizeof(cmds));
+    memset(stdin_redir, 0, sizeof(stdin_redir));
+    memset(stdout_redir, 0, sizeof(stdout_redir));
     parseargs(argv, cmds, stdin_redir, stdout_redir);
 
-    // for (int i=0; i<sizeof(*argv); i++) {
-    //     printf("%s \n", argv[i]);
-    // }
-
-    // /bin/cat trace01.txt > test.txt
+    fprintf(debug, "argv: ");
+    for (int i=0; i<MAXARGS; i++) {
+        fprintf(debug, "%s - ", argv[i]);
+    }
+    fprintf(debug, "\n\ncmds: ");
+    for (int i=0; i<MAXCMDS; i++) {
+        fprintf(debug, "%d - ", cmds[i]);
+    }
+    fprintf(debug, "\n\nstdin_redir: ");
+    for (int i=0; i<MAXCMDS; i++) {
+        fprintf(debug, "%d - ", stdin_redir[i]);
+    }
+    fprintf(debug, "\n\nstdout_redir: ");
+    for (int i=0; i<MAXCMDS; i++) {
+        fprintf(debug, "%d - ", stdout_redir[i]);
+    }
+    fclose(debug);
 
     int childPid, c = 0;
     if ((childPid = fork()) == 0) {
-        // Check the command for any input or output redirection, and perform that redirection.
-        // Close any open file descriptors that will not be used by the child process. This includes file descriptors that were created as part of input/output redirection.
-        if (argv[c]) {
+        if (argv[cmds[c]]) {
             if (stdin_redir[c] > 1) {
                 FILE *file = fopen(argv[stdin_redir[c]], "r");
                 if (dup2(fileno(file), 0) < 0) {
@@ -150,19 +160,19 @@ void eval(char *cmdline)
             }
         }
 
-        // Run the executable in the context of the child process using execve().
         if (execve(argv[c], argv, environ) < 0) {
             printf("%s: Command not found.\n", argv[c]);
         }
 
+        // c++;
+
         exit(0);
     }
     else {
-        // Put the child process in its own process group, for which the group ID is the same as the process ID of the child process. You can use setpgid(pid, pid), where pid is the process ID of the child process. This makes it so that any signals sent to the group ID of the child process do not also go to the shell itself, which would effectively terminate the shell!
         if (setpgid(childPid, childPid) < 0) {
             printf("setpgid failed");
         }
-        // wait for the child process to complete.
+
         int status;
         if (waitpid(childPid, &status, 0) < 0) {
             printf("waitpid failed");
@@ -207,26 +217,26 @@ int parseargs(char **argv, int *cmds, int *stdin_redir, int *stdout_redir)
             argindex++;
             if (!argv[argindex]) { /* if we have reached the end, then break */
                 break;
-	    }
+	        }
             stdin_redir[cmdindex] = argindex;
-	} else if (strcmp(argv[argindex], ">") == 0) {
+        } else if (strcmp(argv[argindex], ">") == 0) {
             argv[argindex] = NULL;
             argindex++;
             if (!argv[argindex]) { /* if we have reached the end, then break */
                 break;
-	    }
+            }
             stdout_redir[cmdindex] = argindex;
-	} else if (strcmp(argv[argindex], "|") == 0) {
+        } else if (strcmp(argv[argindex], "|") == 0) {
             argv[argindex] = NULL;
             argindex++;
             if (!argv[argindex]) { /* if we have reached the end, then break */
                 break;
-	    }
+            }
             cmdindex++;
             cmds[cmdindex] = argindex;
             stdin_redir[cmdindex] = -1;
             stdout_redir[cmdindex] = -1;
-	}
+        }
         argindex++;
     }
 
