@@ -208,6 +208,10 @@ void eval(char *cmdline)
                         fprintf(debug, "dup2 pipe write redirect failed");
                     }
                     close(pipefd[1]);
+                    // if (dup2(pipefd[0], 0) < 0) {
+                    //     fprintf(debug, "dup2 pipe read redirect failed");
+                    // }
+                    // close(pipefd[0]);
                 }
 
                 if (execve(argv[cmdCounter], argv, environ) < 0) {
@@ -221,12 +225,7 @@ void eval(char *cmdline)
                     fprintf(debug, "setpgid failed");
                 }
 
-                int status;
-                if (waitpid(pids[childCount], &status, 0) < 0) {
-                    fprintf(debug, "waitpid failed");
-                }
-
-                // close(pipefd[0]);
+                close(pipefd[1]);
             }
             childCount++;
 
@@ -250,7 +249,7 @@ void eval(char *cmdline)
                     }
 
                     if (dup2(pipefd[0], 0) < 0) {
-                        fprintf(debug, "dup2 pipe write redirect failed");
+                        fprintf(debug, "dup2 pipe read redirect failed");
                     }
                     close(pipefd[0]);
                 }
@@ -271,15 +270,18 @@ void eval(char *cmdline)
                     fprintf(debug, "setpgid failed");
                 }
 
-                int status;
-                if (waitpid(pids[childCount], &status, 0) < 0) {
-                    fprintf(debug, "waitpid failed");
-                }
-
-                // close(pipefd[1]);
+                close(pipefd[1]);
+                close(pipefd[0]);
             }
             childCount++;
             // /bin/cat test.txt | /bin/grep notlandontowers
+        }
+
+        int status;
+        for (int i=0; i<childCount; i++) {
+            if (waitpid(pids[i], &status, 0) < 0) {
+                fprintf(debug, "waitpid failed");
+            }
         }
     }
 
