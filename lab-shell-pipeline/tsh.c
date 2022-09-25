@@ -139,6 +139,7 @@ void eval(char *cmdline)
     for (int i=0; i<MAXCMDS; i++) {
         fprintf(debug, "%d - ", stdout_redir[i]);
     }
+    fflush(debug);
 
     if (totalCmds == 0) {
         // No commands!
@@ -179,7 +180,7 @@ void eval(char *cmdline)
                 fprintf(debug, "waitpid failed");
             }
         }
-    } else {
+    } else if (totalCmds == 2) {
         int pids[MAXCMDS], childCount = 0;
         for (int cmdCounter=0; cmdCounter < totalCmds-1; cmdCounter+=2) {
             int pipefd[2];
@@ -208,10 +209,6 @@ void eval(char *cmdline)
                         fprintf(debug, "dup2 pipe write redirect failed");
                     }
                     close(pipefd[1]);
-                    // if (dup2(pipefd[0], 0) < 0) {
-                    //     fprintf(debug, "dup2 pipe read redirect failed");
-                    // }
-                    // close(pipefd[0]);
                 }
 
                 if (execve(argv[cmdCounter], argv, environ) < 0) {
@@ -275,6 +272,115 @@ void eval(char *cmdline)
             }
             childCount++;
             // /bin/cat test.txt | /bin/grep notlandontowers
+        }
+
+        int status;
+        for (int i=0; i<childCount; i++) {
+            if (waitpid(pids[i], &status, 0) < 0) {
+                fprintf(debug, "waitpid failed");
+            }
+        }
+    } else {
+        int pipes[(totalCmds-1)*2], pipeCounter = 0;
+        for (int i=0; i<totalCmds-1; i++) {
+            int p[2];
+            if (pipe(p) == -1) {
+                fprintf(debug, "Pipe Failed");
+            }
+            pipes[2*i] = p[0];
+            pipes[2*i+1] = p[1];
+        }
+
+        int pids[MAXCMDS], childCount = 0;
+        for (int cmdCounter=0; cmdCounter < totalCmds-1; cmdCounter++) {
+            if ((pids[childCount] = fork()) == 0) {
+                if (argv[cmds[cmdCounter]]) {
+                    if (stdin_redir[cmdCounter] > 1) {
+                        FILE *file = fopen(argv[stdin_redir[cmdCounter]], "r");
+                        if (dup2(fileno(file), 0) < 0) {
+                            fprintf(debug, "dup2 in stdin_redir failed");
+                        }
+                        close(fileno(file));
+                    }
+                    if (stdout_redir[cmdCounter] > 1) {
+                        FILE *file = fopen(argv[stdout_redir[cmdCounter]], "w");
+                        if (dup2(fileno(file), 1) < 0) {
+                            fprintf(debug, "dup2 in stdout_redir failed");
+                        }
+                        close(fileno(file));
+                    }
+
+                    if (cmdCounter > 0) {
+                        if (dup2(pipes[pipeCounter], pipes[pipeCounter-2]) < 0) {
+                            fprintf(debug, "dup2 pipe read redirect failed");
+                        }
+                        close(pipes[pipeCounter]);
+                    }
+                    if (dup2(pipes[pipeCounter+1], 1) < 0) {
+                        fprintf(debug, "dup2 pipe write redirect failed");
+                    }
+                    close(pipes[pipeCounter+1]);
+                }
+
+                if (execve(argv[cmdCounter], argv, environ) < 0) {
+                    fprintf(debug, "%s: Command not found.\n", argv[cmdCounter]);
+                }
+
+                exit(0);
+            }
+            else {
+                if (setpgid(pids[childCount], pids[0]) < 0) {
+                    fprintf(debug, "setpgid failed");
+                }
+
+                close(pipes[pipeCounter+1]);
+            }
+            childCount++;
+
+            if ((pids[childCount] = fork()) == 0) {
+                if (argv[cmds[cmdCounter+1]]) {
+                    if (stdin_redir[cmdCounter+1] > 1) {
+                        FILE *file = fopen(argv[stdin_redir[cmdCounter+1]], "r");
+                        if (dup2(fileno(file), 0) < 0) {
+                            fprintf(debug, "dup2 in stdin_redir failed");
+                        }
+                        close(fileno(file));
+                    }
+                    if (stdout_redir[cmdCounter+1] > 1) {
+                        FILE *file = fopen(argv[stdout_redir[cmdCounter+1]], "w");
+                        if (dup2(fileno(file), 1) < 0) {
+                            fprintf(debug, "dup2 in stdout_redir failed");
+                        }
+                        close(fileno(file));
+                    }
+
+                    if (dup2(pipes[pipeCounter], 0) < 0) {
+                        fprintf(debug, "dup2 pipe read redirect failed");
+                    }
+                    close(pipes[pipeCounter]);
+                    if (cmdCounter+1 < totalCmds-1) {
+                        if (dup2(pipes[pipeCounter+3], 1) < 0) {
+                            fprintf(debug, "dup2 pipe write redirect failed");
+                        }
+                        close(pipes[pipeCounter+1]);
+                    }
+                }
+
+                if (execve(argv[cmds[cmdCounter+1]], &argv[cmds[cmdCounter+1]], environ) < 0) {
+                    fprintf(debug, "%s: Command not found.\n", argv[cmds[cmdCounter+1]]);
+                }
+
+                exit(0);
+            }
+            else {
+                if (setpgid(pids[childCount], pids[0]) < 0) {
+                    fprintf(debug, "setpgid failed");
+                }
+
+                close(pipes[pipeCounter+1]);
+            }
+            childCount++;
+            pipeCounter+=2;
         }
 
         int status;
