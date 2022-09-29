@@ -28,10 +28,21 @@ int main(int argc, char *argv[]) {
 
 	switch (scenario[0]) {
 	case '0':
+		kill(pid, SIGHUP);
 		break;
 	case '1':
+		kill(pid, 12);
+		sleep(1);
+		kill(pid, SIGTERM);
 		break;
 	case '2':
+		kill(pid, SIGHUP);
+		sleep(1);
+		kill(pid, 10);
+		sleep(1);
+		kill(pid, 12);
+		sleep(1);
+		kill(pid, SIGTERM);
 		break;
 	case '3':
 		break;
@@ -42,8 +53,27 @@ int main(int argc, char *argv[]) {
 	case '6':
 		break;
 	case '7':
+		kill(pid, SIGHUP);
+		sleep(1);
+		kill(pid, 10);
+		sleep(1);
+		kill(pid, 12);
+		sleep(1);
+		kill(pid, SIGTERM);
 		break;
 	case '8':
+		kill(pid, 31);
+		kill(pid, SIGHUP);
+		sleep(5);
+		kill(pid, 10);
+		sleep(1);
+		kill(pid, 30);
+		sleep(1);
+		kill(pid, SIGTERM);
+		sleep(1);
+		kill(pid, 12);
+		sleep(1);
+		kill(pid, SIGTERM);
 		break;
 	case '9': 
 		break;
