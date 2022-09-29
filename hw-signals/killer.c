@@ -103,9 +103,11 @@ int main(int argc, char *argv[]) {
 		kill(pid, SIGTERM);
 		break;
 	case '9': 
+		kill(pid, 31);
+		sleep(1);
 		kill(pid, SIGQUIT);
-		
-
+		sleep(1);
+		kill(pid, 31);
 		sleep(5);
 		kill(pid, 12);
 		sleep(1);
