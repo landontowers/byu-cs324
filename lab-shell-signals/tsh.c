@@ -203,23 +203,21 @@ void eval(char *cmdline)
         }
         exit(0);
     }
-    else {
-        sigprocmask(SIG_BLOCK, &mask_all, NULL);
 
-        if (setpgid(pid, pid) < 0) {
-            printf("setpgid failed");
-        }
+    if (setpgid(pid, pid) < 0) {
+        printf("setpgid failed");
+    }
 
-        addjob(jobs, pid, pid, bg+1, cmdline);  /* Add the child to the job list */
+    addjob(jobs, pid, pid, bg+1, cmdline);  /* Add the child to the job list */
+    
+    sigprocmask(SIG_BLOCK, &mask_all, NULL);
+    sigprocmask(SIG_SETMASK, &prev_chld, NULL);  /* Unblock SIGCHLD */
+    sigprocmask(SIG_SETMASK, &prev_sigint, NULL); /* Unblock SIGINT */
+    sigprocmask(SIG_SETMASK, &prev_tstp, NULL); /* Unblock SIGTSTP */
 
-        sigprocmask(SIG_SETMASK, &prev_chld, NULL);  /* Unblock SIGCHLD */
-        sigprocmask(SIG_SETMASK, &prev_sigint, NULL); /* Unblock SIGINT */
-        sigprocmask(SIG_SETMASK, &prev_tstp, NULL); /* Unblock SIGTSTP */
-
-        int status;
-        if (waitpid(pid, &status, 0) < 0) {
-            printf("waitpid failed");
-        }
+    int status;
+    if (waitpid(pid, &status, 0) < 0) {
+        printf("waitpid failed");
     }
 
     return;
@@ -390,7 +388,9 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
-    return;
+    if (verbose)
+		printf("sigchld_handler: entering\n");
+	return;
 }
 
 /* 
