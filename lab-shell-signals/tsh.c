@@ -120,7 +120,7 @@ int main(int argc, char **argv)
     /* Install the signal handlers */
 
     /* These are the ones you will need to implement */
-    Signal(SIGINT,  sigint_handler);   /* ctrl-c */
+    // Signal(SIGINT,  sigint_handler);   /* ctrl-c */
     Signal(SIGTSTP, sigtstp_handler);  /* ctrl-z */
     Signal(SIGCHLD, sigchld_handler);  /* Terminated or stopped child */
 
@@ -167,6 +167,61 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
+    char* argv[MAXARGS];
+    memset(argv, 0, sizeof(argv));
+    int bg = parseline(cmdline,argv);
+
+    builtin_cmd(argv);
+
+    int pid;
+    sigset_t mask_all, mask_sigchld, prev_chld, mask_sigint, prev_sigint, mask_tstp, prev_tstp;
+
+    sigfillset(&mask_all);
+    sigemptyset(&mask_sigchld);
+    sigemptyset(&mask_sigint);
+    sigemptyset(&mask_tstp);
+
+    sigaddset(&mask_sigchld, SIGCHLD);
+    sigaddset(&mask_sigint, SIGINT);
+    sigaddset(&mask_tstp, SIGTSTP);
+
+    signal(SIGCHLD, sigchld_handler);
+    signal(SIGINT, sigint_handler);
+    signal(SIGTSTP, sigtstp_handler);
+
+    sigprocmask(SIG_BLOCK, &mask_sigchld, &prev_chld); /* Block SIGCHLD */
+    sigprocmask(SIG_BLOCK, &mask_sigint, &prev_sigint); /* Block SIGINT */
+    sigprocmask(SIG_BLOCK, &mask_tstp, &prev_tstp); /* Block SIGTSTP */
+
+    if ((pid = fork()) == 0) { /* Child process */
+        sigprocmask(SIG_SETMASK, &prev_chld, NULL); /* Unblock SIGCHLD */
+        sigprocmask(SIG_SETMASK, &prev_sigint, NULL); /* Unblock SIGINT */
+        sigprocmask(SIG_SETMASK, &prev_tstp, NULL); /* Unblock SIGTSTP */
+
+        if (execve(argv[0], argv, environ) < 0) {
+            printf("%s: Command not found.\n", argv[0]);
+        }
+        exit(0);
+    }
+    else {
+        sigprocmask(SIG_BLOCK, &mask_all, NULL);
+
+        if (setpgid(pid, pid) < 0) {
+            printf("setpgid failed");
+        }
+
+        addjob(jobs, pid, pid, bg+1, cmdline);  /* Add the child to the job list */
+
+        sigprocmask(SIG_SETMASK, &prev_chld, NULL);  /* Unblock SIGCHLD */
+        sigprocmask(SIG_SETMASK, &prev_sigint, NULL); /* Unblock SIGINT */
+        sigprocmask(SIG_SETMASK, &prev_tstp, NULL); /* Unblock SIGTSTP */
+
+        int status;
+        if (waitpid(pid, &status, 0) < 0) {
+            printf("waitpid failed");
+        }
+    }
+
     return;
 }
 
@@ -294,6 +349,15 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
+    if(strcmp(argv[0],"quit") == 0)
+        exit(0);
+    else if (strcmp(argv[0],"fg") == 0)
+        do_bgfg(argv);
+    else if (strcmp(argv[0],"bg") == 0)
+        do_bgfg(argv);
+    else if (strcmp(argv[0],"jobs") == 0)
+        listjobs(jobs);
+    
     return 0;     /* not a builtin command */
 }
 
