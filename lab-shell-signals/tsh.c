@@ -423,14 +423,14 @@ void do_bgfg(char **argv)
     
     if (strcmp(argv[0],"fg") == 0) {
         job->state = FG;
-        kill(job->pgid, SIGCONT);
+        kill(-job->pgid, SIGCONT);
         waitfg(job->pid);
     }
     else {
         job->state = BG;
         printf("[%d] (%d) %s", job->jidS, job->pid, job->cmdline);
         fflush(stdout);  
-        kill(job->pgid, SIGCONT);
+        kill(-job->pgid, SIGCONT);
     }
     
     return;
