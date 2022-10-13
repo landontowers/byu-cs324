@@ -85,32 +85,55 @@ int main(int argc, char *argv[]) {
 
 	/* SECTION C - interact with server; send, receive, print messages */
 
-	/* Send remaining command-line arguments as separate
-	   datagrams, and read responses from server */
-	for (j = hostindex + 2; j < argc; j++) {
-		len = strlen(argv[j]) + 1;
-		/* +1 for terminating null byte */
-
-		if (len + 1 > BUF_SIZE) {
-			fprintf(stderr,
-					"Ignoring long message in argument %d\n", j);
-			continue;
-		}
-
-		if (write(sfd, argv[j], len) != len) {
-			fprintf(stderr, "partial/failed write\n");
-			exit(EXIT_FAILURE);
-		}
-
-		nread = read(sfd, buf, BUF_SIZE);
-		if (nread == -1) {
-			perror("read");
-			exit(EXIT_FAILURE);
-		}
-
-		printf("Received %zd bytes: %s\n", nread, buf);
-
+	char buffer[BUF_SIZE];
+	int bytesRead;
+	int totalBytesRead = 0;
+	while ((bytesRead = fread(&buffer[totalBytesRead], 1, BUF_SIZE, stdin)) != '\0') {
+		totalBytesRead+=bytesRead;
 	}
+
+	buffer[totalBytesRead] = "\0";
+
+	int bytesToSend = totalBytesRead;
+	int bytesSent;
+	while (bytesToSend > 0) {
+		bytesSent = write(sfd, buffer, BUF_SIZE);
+		bytesToSend-=BUF_SIZE;
+	}
+
+
+	// printf("\n%d", totalBytesRead);
+	// for (int i=0; i<totalBytesRead; i++) {
+	// 	printf("%c", (char) buffer[i]);
+	// }
+	// printf("\n"); fflush(stdout);
+
+	// /* Send remaining command-line arguments as separate
+	//    datagrams, and read responses from server */
+	// for (j = hostindex + 2; j < argc; j++) {
+	// 	len = strlen(argv[j]) + 1;
+	// 	/* +1 for terminating null byte */
+
+	// 	if (len + 1 > BUF_SIZE) {
+	// 		fprintf(stderr,
+	// 				"Ignoring long message in argument %d\n", j);
+	// 		continue;
+	// 	}
+
+	// 	if (write(sfd, argv[j], len) != len) {
+	// 		fprintf(stderr, "partial/failed write\n");
+	// 		exit(EXIT_FAILURE);
+	// 	}
+
+	// 	// nread = read(sfd, buf, BUF_SIZE);
+	// 	// if (nread == -1) {
+	// 	// 	perror("read");
+	// 	// 	exit(EXIT_FAILURE);
+	// 	// }
+
+	// 	// printf("Received %zd bytes: %s\n", nread, buf);
+
+	// }
 
 	exit(EXIT_SUCCESS);
 }

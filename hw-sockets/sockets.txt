@@ -13,11 +13,11 @@
 13. The listening socket is maintaining the connection around the accept sockets, so the connection is established before any data is recieved by the accept sockets.
 14. The port remains consistant.
 15. The port changes.
-16. One for each client. 
-17. I don't really see a difference.
-18.
-19.
-20.
+16. One for each client. The printouts honestly seem identical, though?
+17. 3 calls.
+18. 1 message.
+19. 1 call.
+20. TCP guaruntees that the packets will arrive correctly and in order and can therefore be assembled into a single message if all the packets are recieved already.
 21.
 22.
 23.

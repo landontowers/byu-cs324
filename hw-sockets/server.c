@@ -89,6 +89,7 @@ int main(int argc, char *argv[]) {
 	for (;;) {
 		remote_addr_len = sizeof(struct sockaddr_storage);
 		int asfd = accept(sfd, (struct sockaddr *) &remote_addr, &remote_addr_len);
+		sleep(5);
 		for (;;) {
 			nread = recv(asfd, buf, BUF_SIZE, 0);
 			//sleep(5);
