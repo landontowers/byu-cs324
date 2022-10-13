@@ -72,7 +72,7 @@ int main(int argc, char *argv[]) {
 
 	/* SECTION B - setup socket */
 
-	if ((sfd = socket(address_family, SOCK_STREAM, 0)) < -1) {
+	if ((sfd = socket(address_family, sock_type, 0)) < -1) {
 		perror("Error creating socket");
 		exit(EXIT_FAILURE);
 	}
@@ -85,34 +85,30 @@ int main(int argc, char *argv[]) {
 	/* SECTION C - interact with clients; receive and send messages */
 
 	/* Read datagrams and echo them back to sender */
-	listen(sfd, 100);
+
 	for (;;) {
 		remote_addr_len = sizeof(struct sockaddr_storage);
-		int asfd = accept(sfd, (struct sockaddr *) &remote_addr, &remote_addr_len);
-		for (;;) {
-			nread = recv(asfd, buf, BUF_SIZE, 0);
-			//sleep(5);
-			if (nread == -1)
-				continue;   /* Ignore failed request */
-			else if (nread == 0) {
-				close(asfd);
-				break;
-			}
+		nread = recvfrom(sfd, buf, BUF_SIZE, 0,
+				(struct sockaddr *) &remote_addr, &remote_addr_len);
+		sleep(5);
+		if (nread == -1)
+			continue;   /* Ignore failed request */
 
-			char host[NI_MAXHOST], service[NI_MAXSERV];
+		char host[NI_MAXHOST], service[NI_MAXSERV];
 
-			s = getnameinfo((struct sockaddr *) &remote_addr,
-							remote_addr_len, host, NI_MAXHOST,
-							service, NI_MAXSERV, NI_NUMERICSERV | NI_NUMERICHOST);
-		
-			if (s == 0)
-				printf("Received %zd bytes from %s:%s\n", nread, host, service);
-			else
-				fprintf(stderr, "getnameinfo: %s\n", gai_strerror(s));
-
-			if (send(asfd, buf, nread, 0) < 0)
-				fprintf(stderr, "Error sending response\n");
-		}
-	}
+		s = getnameinfo((struct sockaddr *) &remote_addr,
+						remote_addr_len, host, NI_MAXHOST,
+						service, NI_MAXSERV, NI_NUMERICSERV | NI_NUMERICHOST);
 	
+		if (s == 0)
+			printf("Received %zd bytes from %s:%s\n",
+					nread, host, service);
+		else
+			fprintf(stderr, "getnameinfo: %s\n", gai_strerror(s));
+
+		if (sendto(sfd, buf, nread, 0,
+					(struct sockaddr *) &remote_addr,
+					remote_addr_len) < 0)
+			fprintf(stderr, "Error sending response\n");
+	}
 }

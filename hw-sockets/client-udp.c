@@ -66,7 +66,8 @@ int main(int argc, char *argv[]) {
 	/* SECTION B - pre-socket setup; getaddrinfo() */
 
 	for (rp = result; rp != NULL; rp = rp->ai_next) {
-		sfd = socket(AF_INET, SOCK_STREAM, 0);
+		sfd = socket(rp->ai_family, rp->ai_socktype,
+				rp->ai_protocol);
 		if (sfd == -1)
 			continue;
 
@@ -87,6 +88,7 @@ int main(int argc, char *argv[]) {
 
 	/* Send remaining command-line arguments as separate
 	   datagrams, and read responses from server */
+
 	for (j = hostindex + 2; j < argc; j++) {
 		len = strlen(argv[j]) + 1;
 		/* +1 for terminating null byte */
@@ -102,13 +104,13 @@ int main(int argc, char *argv[]) {
 			exit(EXIT_FAILURE);
 		}
 
-		nread = read(sfd, buf, BUF_SIZE);
-		if (nread == -1) {
-			perror("read");
-			exit(EXIT_FAILURE);
-		}
+		// nread = read(sfd, buf, BUF_SIZE);
+		// if (nread == -1) {
+		// 	perror("read");
+		// 	exit(EXIT_FAILURE);
+		// }
 
-		printf("Received %zd bytes: %s\n", nread, buf);
+		// printf("Received %zd bytes: %s\n", nread, buf);
 
 	}
 
