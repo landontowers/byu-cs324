@@ -92,17 +92,39 @@ int main(int argc, char *argv[]) {
 		totalBytesRead+=bytesRead;
 	}
 
-	buffer[totalBytesRead] = "\0";
-
-	int bytesToSend = totalBytesRead;
+	int offset = 0;
 	int bytesSent;
-	while (bytesToSend > 0) {
-		bytesSent = write(sfd, buffer, BUF_SIZE);
-		bytesToSend-=BUF_SIZE;
+	while (offset < totalBytesRead) {
+		bytesSent = write(sfd, buffer+offset, 5);
+		offset += bytesSent;
+		//printf("%d\n", bytesSent);
+	}
+
+	char buffer2[16384];
+	totalBytesRead = 0;
+	while ((bytesRead = read(sfd, buffer2+totalBytesRead, BUF_SIZE)) != 0){
+		if (bytesRead == -1) {
+			perror("read");
+			exit(EXIT_FAILURE);
+		}
+		totalBytesRead+=bytesRead;
+	}
+
+	// printf("\n%d\n", totalBytesRead);
+	// for (int i=0; i<totalBytesRead; i++) {
+	// 	printf("%c", (char) buffer2[i]);
+	// }
+	// printf("\n"); fflush(stdout);
+
+	offset = 0;
+	while (offset < totalBytesRead) {
+		// bytesSent = write(1, buffer2+offset, 5);
+		bytesSent = fwrite(buffer2+offset, 1, totalBytesRead, stdout);
+		offset += bytesSent; 
 	}
 
 
-	// printf("\n%d", totalBytesRead);
+	//printf("\n%d\n", totalBytesRead);
 	// for (int i=0; i<totalBytesRead; i++) {
 	// 	printf("%c", (char) buffer[i]);
 	// }

@@ -18,11 +18,40 @@
 18. 1 message.
 19. 1 call.
 20. TCP guaruntees that the packets will arrive correctly and in order and can therefore be assembled into a single message if all the packets are recieved already.
-21.
-22.
-23.
-24.
-25.
-26.
-27.
-28.
+21. 0ef39a3f241cdd6552ad131e01afa9171b3dab8d
+22. cat http-bestill.txt | ./client -4 www-notls.imaal.byu.edu 80 > bestill.txt
+23. HTTP/1.1 200 OK
+    Date: Fri, 14 Oct 2022 23:46:26 GMT
+    Server: Apache/2.4.54 (Debian)
+    Upgrade: h2c
+    Connection: Upgrade, close
+    Content-length: 809
+    Vary: Accept-Encoding
+    Content-Type: text/plain
+
+
+    1. Be still, my soul: The Lord is on thy side;
+    With patience bear thy cross of grief or pain.
+    Leave to thy God to order and provide;
+    In ev'ry change he faithful will remain.
+    Be still, my soul: Thy best, thy heav'nly Friend
+    Thru thorny ways leads to a joyful end.
+
+    2. Be still, my soul: Thy God doth undertake
+    To guide the future as he has the past.
+    Thy hope, thy confidence let nothing shake;
+    All now mysterious shall be bright at last.
+    Be still, my soul: The waves and winds still know
+    His voice who ruled them while he dwelt below.
+
+    3. Be still, my soul: The hour is hast'ning on
+    When we shall be forever with the Lord,
+    When disappointment, grief, and fear are gone,
+    Sorrow forgot, love's purest joys restored.
+    Be still, my soul: When change and tears are past,
+    All safe and blessed we shall meet at last.
+24. cat http-socket.txt | ./client -4 www-notls.imaal.byu.edu 80 | ./strip_http.py > socket.jpg
+25. c03ce59f9d77e2a3cf001d9dfcb66675ac1a5a81  socket.jpg
+26. If no messages are available at the socket, the receive calls wait for a message to arrive, unless the socket is nonblocking, in which case the value -1 is returned.
+27. If a message is too long to fit  in the supplied buffer, excess bytes may be discarded depending on the type of socket the message is received from.
+28. When the packet is smaller than the passed buffer, only that much data is returned.
