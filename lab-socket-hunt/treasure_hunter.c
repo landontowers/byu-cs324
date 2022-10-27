@@ -4,6 +4,7 @@
 #define FIRST_REQUEST_SIZE 8
 #define REQUEST_SIZE 4
 #define RESPONSE_SIZE 256
+#define TREASURE_SIZE 1024
 
 #include <stdio.h>
 #include <string.h>
@@ -19,6 +20,9 @@ int verbose = 0;
 void print_bytes(unsigned char *bytes, int byteslen);
 
 int main(int argc, char *argv[]) {
+	unsigned char treasure[TREASURE_SIZE];
+	int treasureIndex = 0;
+	
 	const int userid = htonl(USERID);
 	char* server = argv[1];
 	char* port = argv[2];
@@ -71,7 +75,7 @@ int main(int argc, char *argv[]) {
 	send(sfd, first_request, FIRST_REQUEST_SIZE, 0);
 	ssize_t bytesRecieved = recv(sfd, response, RESPONSE_SIZE, 0);
 
-	print_bytes(response, bytesRecieved);
+	// print_bytes(response, bytesRecieved);
 
 	unsigned char chunkLength;
 	unsigned char chunk[RESPONSE_SIZE];
@@ -79,29 +83,29 @@ int main(int argc, char *argv[]) {
 	unsigned short opParam;
 	unsigned int nonce;
 
-	memcpy(&chunkLength, &response[0], 1);
-	memcpy(&chunk, &response[1], chunkLength);
-	memcpy(&opCode, &response[chunkLength+1], 1);
-	memcpy(&opParam, &response[chunkLength+2], 2);
-	memcpy(&nonce, &response[chunkLength+4], 4);
-	// nonce = ntohl(++nonce);
-	++nonce;
+	do {
+		memcpy(&chunkLength, &response[0], 1);
+		memcpy(&chunk, &response[1], chunkLength);
+		memcpy(&opCode, &response[chunkLength+1], 1);
+		memcpy(&opParam, &response[chunkLength+2], 2);
+		memcpy(&nonce, &response[chunkLength+4], 4);
+		nonce = ntohl(nonce);
+		++nonce;
+		nonce = htonl(nonce);
 
-	printf("\nChunk Length: %d\n", chunkLength);
-	printf("Chunk: %s\n", chunk);
-	printf("opCode: %d\n", opCode);
-	printf("opParam: %d\n", opParam);
-	printf("nonce: %X\n", nonce);
+		memcpy(&treasure[treasureIndex], &chunk, chunkLength);
+		treasureIndex += chunkLength;
 
-	unsigned char request[REQUEST_SIZE];
-	memcpy(&request, &nonce, 4);
+		unsigned char request[REQUEST_SIZE];
+		memcpy(&request, &nonce, 4);
 
-	print_bytes(request, REQUEST_SIZE);
+		send(sfd, request, REQUEST_SIZE, 0);
+		bytesRecieved = recv(sfd, response, RESPONSE_SIZE, 0);
+	}
+	while (chunkLength != 0);
+	treasure[treasureIndex] = 0;
 
-	send(sfd, request, REQUEST_SIZE, 0);
-	bytesRecieved = recv(sfd, response, RESPONSE_SIZE, 0);
-
-	print_bytes(response, bytesRecieved);
+	printf("%s\n", treasure);
 }
 
 void print_bytes(unsigned char *bytes, int byteslen) {
