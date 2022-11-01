@@ -28,9 +28,6 @@ int main(int argc, char *argv[]) {
 	char* port = argv[2];
 	int level = atoi(argv[3]); //htons(atoi(argv[3]));
 	char levelChar = 0;
-	// printf("level 1: %d\n", level);
-	// level = htons(level);
-	// printf("level 2: %d\n", level);
 	int seed = htonl(atoi(argv[4]));
 
 	unsigned char first_request[FIRST_REQUEST_SIZE];
@@ -55,7 +52,7 @@ int main(int argc, char *argv[]) {
 	// print_bytes(first_request, FIRST_REQUEST_SIZE);
 
 	struct addrinfo hints;
-	struct addrinfo *result, *rp;
+	struct addrinfo *result;
 	int sfd, s;
 
 	memset(&hints, 0, sizeof(struct addrinfo));
@@ -71,30 +68,37 @@ int main(int argc, char *argv[]) {
 		exit(EXIT_FAILURE);
 	}
 
-	for (rp = result; rp != NULL; rp = rp->ai_next) {
-		sfd = socket(AF_INET, SOCK_DGRAM, 0);
-		if (sfd == -1)
-			continue;
-
-		if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1)
-			break;  /* Success */
-
-		close(sfd);
-	}
-
-	if (rp == NULL) {   /* No address succeeded */
+	if (result == NULL) {   /* No address succeeded */
 		fprintf(stderr, "Could not connect\n");
 		exit(EXIT_FAILURE);
 	}
 
+	int af;
+	struct sockaddr_in ipv4addr_remote;
+	struct sockaddr_in6 ipv6addr_remote;
+
+	af = result->ai_family;
+	if (af == AF_INET) {
+		ipv4addr_remote = *(struct sockaddr_in *)result->ai_addr;
+	} else {
+		ipv6addr_remote = *(struct sockaddr_in6 *)result->ai_addr;
+	}
+
+	sfd = socket(af, result->ai_socktype, 0);
+	
+	unsigned char response[RESPONSE_SIZE];
+	socklen_t remote_addr_len = sizeof(struct sockaddr_storage);
+	if (sendto(sfd, first_request, FIRST_REQUEST_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, remote_addr_len) < 0) {
+		perror("sendto()");
+	}
+	ssize_t bytesRecieved;
+	if ((bytesRecieved = recvfrom(sfd, response, RESPONSE_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, &remote_addr_len)) < 0) {
+		perror("recvfrom()");
+	}
+
 	freeaddrinfo(result);
 
-	unsigned char response[RESPONSE_SIZE];
-
-	send(sfd, first_request, FIRST_REQUEST_SIZE, 0);
-	ssize_t bytesRecieved = recv(sfd, response, RESPONSE_SIZE, 0);
-
-	print_bytes(response, bytesRecieved);
+	// print_bytes(response, bytesRecieved);
 
 	unsigned char chunkLength = 0;
 	unsigned char chunk[RESPONSE_SIZE];
@@ -102,13 +106,9 @@ int main(int argc, char *argv[]) {
 	unsigned short opParam = 0;
 	unsigned int nonce = 0;
 
-	int af;
-	struct sockaddr_in ipv4addr_remote;
-	struct sockaddr_in6 ipv6addr_remote;
-
 	do {
 		memcpy(&chunkLength, &response[0], 1);
-		if (chunkLength == 0 || chunkLength > 129){
+		if (chunkLength == 0 || chunkLength >= 129){
 			break;
 		}
 		memcpy(&chunk, &response[1], chunkLength);
@@ -126,52 +126,40 @@ int main(int argc, char *argv[]) {
 		unsigned char request[REQUEST_SIZE];
 		memcpy(&request, &nonce, 4);
 
-		send(sfd, request, REQUEST_SIZE, 0);
-		bytesRecieved = recv(sfd, response, RESPONSE_SIZE, 0);
-
-		print_bytes(response, bytesRecieved);
-
 		switch (opCode) {
+			case 0:
+				break;
 			case 1:
 				sprintf(port, "%d", opParam);
-				printf("Port: %s\n", port);
-				s = getaddrinfo(server, port, &hints, &result);
-				if (s != 0) {
-					fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
-					exit(EXIT_FAILURE);
-				}
-
-				for (rp = result; rp != NULL; rp = rp->ai_next) {
-					sfd = socket(AF_INET, SOCK_DGRAM, 0);
-					if (sfd == -1)
-						continue;
-
-					if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1)
-						break;  /* Success */
-
-					close(sfd);
-				}
-
-				if (rp == NULL) {   /* No address succeeded */
-					fprintf(stderr, "Could not connect\n");
-					exit(EXIT_FAILURE);
-				}
-
-				freeaddrinfo(result);
+				ipv4addr_remote.sin_port = opParam;
+				break;
+			case 2:
+				break;
+			case 3:
+				break;
+			case 4:
 				break;
 			default:
-				printf("Unknown opCode: %c", opCode);
+				printf("Unknown opCode: %c\n", opCode);
 				break;
 		}
 
-		// printf("opCode: %d opParam: %u\n", opCode, opParam);
+		if (sendto(sfd, request, REQUEST_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, remote_addr_len) < 0) {
+			perror("sendto()");
+		}
+		if ((bytesRecieved = recvfrom(sfd, response, RESPONSE_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, &remote_addr_len)) < 0) {
+			perror("recvfrom()");
+		}
 
+		// print_bytes(response, bytesRecieved);
 	}
 	while (chunkLength != 0);
 
 	treasure[treasureIndex] = 0;
 
 	printf("%s\n", treasure);
+
+	close(sfd);
 }
 
 void print_bytes(unsigned char *bytes, int byteslen) {
