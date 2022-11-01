@@ -26,14 +26,33 @@ int main(int argc, char *argv[]) {
 	const int userid = htonl(USERID);
 	char* server = argv[1];
 	char* port = argv[2];
-	int level = htons(atoi(argv[3]));
-	int seed = htons(atoi(argv[4]));
+	int level = atoi(argv[3]); //htons(atoi(argv[3]));
+	char levelChar = 0;
+	// printf("level 1: %d\n", level);
+	// level = htons(level);
+	// printf("level 2: %d\n", level);
+	int seed = htonl(atoi(argv[4]));
 
 	unsigned char first_request[FIRST_REQUEST_SIZE];
 	memset(first_request, 0, FIRST_REQUEST_SIZE);
-	memcpy(&first_request[1], &level, 1);
+	switch (level) {
+		case 0:
+			memcpy(&first_request[1], &level, 1);
+			break;
+		case 1:
+			levelChar = 1;
+			memcpy(&first_request[1], &levelChar, 1);
+			break;
+		case 2:
+		case 3: 
+		case 4:
+		default:
+			break;
+	}
 	memcpy(&first_request[2], &userid, 4);
 	memcpy(&first_request[6], &seed, 2);
+
+	// print_bytes(first_request, FIRST_REQUEST_SIZE);
 
 	struct addrinfo hints;
 	struct addrinfo *result, *rp;
@@ -75,20 +94,28 @@ int main(int argc, char *argv[]) {
 	send(sfd, first_request, FIRST_REQUEST_SIZE, 0);
 	ssize_t bytesRecieved = recv(sfd, response, RESPONSE_SIZE, 0);
 
-	// print_bytes(response, bytesRecieved);
+	print_bytes(response, bytesRecieved);
 
-	unsigned char chunkLength;
+	unsigned char chunkLength = 0;
 	unsigned char chunk[RESPONSE_SIZE];
-	int opCode;
-	unsigned short opParam;
-	unsigned int nonce;
+	unsigned char opCode = 0;
+	unsigned short opParam = 0;
+	unsigned int nonce = 0;
+
+	int af;
+	struct sockaddr_in ipv4addr_remote;
+	struct sockaddr_in6 ipv6addr_remote;
 
 	do {
 		memcpy(&chunkLength, &response[0], 1);
+		if (chunkLength == 0 || chunkLength > 129){
+			break;
+		}
 		memcpy(&chunk, &response[1], chunkLength);
 		memcpy(&opCode, &response[chunkLength+1], 1);
 		memcpy(&opParam, &response[chunkLength+2], 2);
 		memcpy(&nonce, &response[chunkLength+4], 4);
+		//opParam = ntohs(opParam);
 		nonce = ntohl(nonce);
 		++nonce;
 		nonce = htonl(nonce);
@@ -101,8 +128,47 @@ int main(int argc, char *argv[]) {
 
 		send(sfd, request, REQUEST_SIZE, 0);
 		bytesRecieved = recv(sfd, response, RESPONSE_SIZE, 0);
+
+		print_bytes(response, bytesRecieved);
+
+		switch (opCode) {
+			case 1:
+				sprintf(port, "%d", opParam);
+				printf("Port: %s\n", port);
+				s = getaddrinfo(server, port, &hints, &result);
+				if (s != 0) {
+					fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
+					exit(EXIT_FAILURE);
+				}
+
+				for (rp = result; rp != NULL; rp = rp->ai_next) {
+					sfd = socket(AF_INET, SOCK_DGRAM, 0);
+					if (sfd == -1)
+						continue;
+
+					if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1)
+						break;  /* Success */
+
+					close(sfd);
+				}
+
+				if (rp == NULL) {   /* No address succeeded */
+					fprintf(stderr, "Could not connect\n");
+					exit(EXIT_FAILURE);
+				}
+
+				freeaddrinfo(result);
+				break;
+			default:
+				printf("Unknown opCode: %c", opCode);
+				break;
+		}
+
+		// printf("opCode: %d opParam: %u\n", opCode, opParam);
+
 	}
 	while (chunkLength != 0);
+
 	treasure[treasureIndex] = 0;
 
 	printf("%s\n", treasure);
