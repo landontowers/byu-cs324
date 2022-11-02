@@ -79,12 +79,21 @@ int main(int argc, char *argv[]) {
 	}
 	
 	unsigned char response[RESPONSE_SIZE];
-	if (sendto(sfd, first_request, FIRST_REQUEST_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, addr_len) < 0) {
-		perror("sendto()");
-	}
 	ssize_t bytesRecieved;
-	if ((bytesRecieved = recvfrom(sfd, response, RESPONSE_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, &addr_len)) < 0) {
-		perror("recvfrom()");
+	if (af == AF_INET) {
+		if (sendto(sfd, first_request, FIRST_REQUEST_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, addr_len) < 0) {
+			perror("sendto()");
+		}
+		if ((bytesRecieved = recvfrom(sfd, response, RESPONSE_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, &addr_len)) < 0) {
+			perror("recvfrom()");
+		}
+	} else {
+		if (sendto(sfd, first_request, FIRST_REQUEST_SIZE, 0, (struct sockaddr *) &ipv6addr_remote, addr_len) < 0) {
+			perror("sendto()");
+		}
+		if ((bytesRecieved = recvfrom(sfd, response, RESPONSE_SIZE, 0, (struct sockaddr *) &ipv6addr_remote, &addr_len)) < 0) {
+			perror("recvfrom()");
+		}
 	}
 
 	freeaddrinfo(result);
@@ -114,28 +123,92 @@ int main(int argc, char *argv[]) {
 			case 0:
 				break;
 			case 1:
-				ipv4addr_remote.sin_port = opParam;
+				if (af == AF_INET) {
+					ipv4addr_remote.sin_port = opParam;
+				} else {
+					ipv6addr_remote.sin6_port = opParam;
+				}
 				break;
 			case 2:
 				close(sfd);
 				sfd = socket(af, SOCK_DGRAM, 0);
-				ipv4addr_local.sin_port = opParam;
-				bind(sfd, (struct sockaddr *) &ipv4addr_local, sizeof(struct sockaddr_in));
+				if (af == AF_INET) {
+					ipv4addr_local.sin_family = AF_INET; // use AF_INET (IPv4)
+					ipv4addr_local.sin_port = opParam; // specific port
+					ipv4addr_local.sin_addr.s_addr = 0; // any/all local addresses
+					if (bind(sfd, (struct sockaddr *)&ipv4addr_local, addr_len) < 0) {
+						perror("bind()");
+					}
+				} else {
+					ipv6addr_local.sin6_family = AF_INET6; // IPv6 (AF_INET6)
+					ipv6addr_local.sin6_port = opParam; // specific port
+					bzero(ipv6addr_local.sin6_addr.s6_addr, 16); // any/all local addresses
+					if (bind(sfd, (struct sockaddr *)&ipv6addr_local, addr_len) < 0) {
+						perror("bind()");
+					}
+				}
 				break;
 			case 3:
 				nonce = 0;
 				opParam = ntohs(opParam);
-				struct sockaddr_in getPorts = ipv4addr_remote;
-				for (int i=0; i<opParam; i++) {
+				if (af == AF_INET) {
+					struct sockaddr_in getPorts = ipv4addr_remote;
+					for (int i=0; i<opParam; i++) {
 					if ((bytesRecieved = recvfrom(sfd, response, RESPONSE_SIZE, 0, (struct sockaddr *) &getPorts, &addr_len)) < 0) {
 						perror("recvfrom()");
 					}
 					nonce += ntohs(getPorts.sin_port);
 				}
+				} else {
+					struct sockaddr_in6 getPorts = ipv6addr_remote;
+					for (int i=0; i<opParam; i++) {
+						if ((bytesRecieved = recvfrom(sfd, response, RESPONSE_SIZE, 0, (struct sockaddr *) &getPorts, &addr_len)) < 0) {
+							perror("recvfrom()");
+						}
+						nonce += ntohs(getPorts.sin6_port);
+					}
+				}
 				nonce++;
 				nonce = htonl(nonce);
 				break;
 			case 4:
+				if (af == AF_INET) {
+					hints.ai_family = AF_INET6;
+					sprintf(port, "%d", ntohs(opParam));
+					s = getaddrinfo(server, port, &hints, &result);
+					if (s != 0) {
+						fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
+						exit(EXIT_FAILURE);
+					}
+					if (result == NULL) {   /* No address succeeded */
+						fprintf(stderr, "Could not connect\n");
+						exit(EXIT_FAILURE);
+					}
+					af = result->ai_family;
+					close(sfd);
+					sfd = socket(af, result->ai_socktype, 0);
+					ipv6addr_remote = *(struct sockaddr_in6 *)result->ai_addr;
+					addr_len = sizeof(struct sockaddr_in6);
+					getsockname(sfd, (struct sockaddr *)&ipv6addr_local, &addr_len);
+				} else {
+					hints.ai_family = AF_INET;
+					sprintf(port, "%d", ntohs(opParam));
+					s = getaddrinfo(server, port, &hints, &result);
+					if (s != 0) {
+						fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
+						exit(EXIT_FAILURE);
+					}
+					if (result == NULL) {   /* No address succeeded */
+						fprintf(stderr, "Could not connect\n");
+						exit(EXIT_FAILURE);
+					}
+					af = result->ai_family;
+					close(sfd);
+					sfd = socket(af, result->ai_socktype, 0);
+					ipv4addr_remote = *(struct sockaddr_in *)result->ai_addr;
+					addr_len = sizeof(struct sockaddr_in);
+					getsockname(sfd, (struct sockaddr *)&ipv4addr_local, &addr_len);
+				}
 				break;
 			default:
 				printf("Unknown opCode: %c\n", opCode);
@@ -148,11 +221,20 @@ int main(int argc, char *argv[]) {
 		unsigned char request[REQUEST_SIZE];
 		memcpy(&request, &nonce, 4);
 
-		if (sendto(sfd, request, REQUEST_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, addr_len) < 0) {
-			perror("sendto()");
-		}
-		if ((bytesRecieved = recvfrom(sfd, response, RESPONSE_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, &addr_len)) < 0) {
-			perror("recvfrom()");
+		if (af == AF_INET) {
+			if (sendto(sfd, request, REQUEST_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, addr_len) < 0) {
+				perror("sendto()");
+			}
+			if ((bytesRecieved = recvfrom(sfd, response, RESPONSE_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, &addr_len)) < 0) {
+				perror("recvfrom()");
+			}
+		} else {
+			if (sendto(sfd, request, REQUEST_SIZE, 0, (struct sockaddr *) &ipv6addr_remote, addr_len) < 0) {
+				perror("sendto()");
+			}
+			if ((bytesRecieved = recvfrom(sfd, response, RESPONSE_SIZE, 0, (struct sockaddr *) &ipv6addr_remote, &addr_len)) < 0) {
+				perror("recvfrom()");
+			}
 		}
 
 		//print_bytes(response, bytesRecieved);
