@@ -26,26 +26,13 @@ int main(int argc, char *argv[]) {
 	const int userid = htonl(USERID);
 	char* server = argv[1];
 	char* port = argv[2];
-	int level = atoi(argv[3]); //htons(atoi(argv[3]));
+	unsigned char level = argv[3][0] - 48; // atoi(argv[3]); //htons(atoi(argv[3]));
 	char levelChar = 0;
 	int seed = htonl(atoi(argv[4]));
 
 	unsigned char first_request[FIRST_REQUEST_SIZE];
 	memset(first_request, 0, FIRST_REQUEST_SIZE);
-	switch (level) {
-		case 0:
-			memcpy(&first_request[1], &level, 1);
-			break;
-		case 1:
-			levelChar = 1;
-			memcpy(&first_request[1], &levelChar, 1);
-			break;
-		case 2:
-		case 3: 
-		case 4:
-		default:
-			break;
-	}
+	memcpy(&first_request[1], &level, 1);
 	memcpy(&first_request[2], &userid, 4);
 	memcpy(&first_request[6], &seed, 2);
 
@@ -78,6 +65,8 @@ int main(int argc, char *argv[]) {
 	struct sockaddr_in ipv4addr_local;
 	struct sockaddr_in6 ipv6addr_remote;
 	struct sockaddr_in6 ipv6addr_local;
+	socklen_t addr_len = sizeof(struct sockaddr_in);
+	socklen_t addr_len6 = sizeof(struct sockaddr_in6);
 
 	af = result->ai_family;
 	if (af == AF_INET) {
@@ -89,12 +78,11 @@ int main(int argc, char *argv[]) {
 	sfd = socket(af, result->ai_socktype, 0);
 	
 	unsigned char response[RESPONSE_SIZE];
-	socklen_t remote_addr_len = sizeof(struct sockaddr_storage);
-	if (sendto(sfd, first_request, FIRST_REQUEST_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, remote_addr_len) < 0) {
+	if (sendto(sfd, first_request, FIRST_REQUEST_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, addr_len) < 0) {
 		perror("sendto()");
 	}
 	ssize_t bytesRecieved;
-	if ((bytesRecieved = recvfrom(sfd, response, RESPONSE_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, &remote_addr_len)) < 0) {
+	if ((bytesRecieved = recvfrom(sfd, response, RESPONSE_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, &addr_len)) < 0) {
 		perror("recvfrom()");
 	}
 
@@ -136,11 +124,15 @@ int main(int argc, char *argv[]) {
 				break;
 			case 2:
 				close(sfd);
-				sfd = socket(af, result->ai_socktype, 0);
+				sfd = socket(af, SOCK_DGRAM, 0);
+				ipv4addr_local.sin_port = opParam;
 				bind(sfd, (struct sockaddr *) &ipv4addr_local, sizeof(struct sockaddr_in));
 				break;
 			case 3:
-				
+				print_bytes(response, bytesRecieved);
+				printf("%ld\n", bytesRecieved);
+				opParam = ntohs(opParam);
+				printf("opParam: %d\n", opParam);
 				break;
 			case 4:
 				break;
@@ -149,10 +141,10 @@ int main(int argc, char *argv[]) {
 				break;
 		}
 
-		if (sendto(sfd, request, REQUEST_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, remote_addr_len) < 0) {
+		if (sendto(sfd, request, REQUEST_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, addr_len) < 0) {
 			perror("sendto()");
 		}
-		if ((bytesRecieved = recvfrom(sfd, response, RESPONSE_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, &remote_addr_len)) < 0) {
+		if ((bytesRecieved = recvfrom(sfd, response, RESPONSE_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, &addr_len)) < 0) {
 			perror("recvfrom()");
 		}
 
