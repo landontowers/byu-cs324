@@ -27,7 +27,6 @@ int main(int argc, char *argv[]) {
 	char* server = argv[1];
 	char* port = argv[2];
 	unsigned char level = argv[3][0] - 48; // atoi(argv[3]); //htons(atoi(argv[3]));
-	char levelChar = 0;
 	int seed = htonl(atoi(argv[4]));
 
 	unsigned char first_request[FIRST_REQUEST_SIZE];
@@ -65,17 +64,19 @@ int main(int argc, char *argv[]) {
 	struct sockaddr_in ipv4addr_local;
 	struct sockaddr_in6 ipv6addr_remote;
 	struct sockaddr_in6 ipv6addr_local;
-	socklen_t addr_len = sizeof(struct sockaddr_in);
-	socklen_t addr_len6 = sizeof(struct sockaddr_in6);
+	socklen_t addr_len;
 
 	af = result->ai_family;
+	sfd = socket(af, result->ai_socktype, 0);
 	if (af == AF_INET) {
 		ipv4addr_remote = *(struct sockaddr_in *)result->ai_addr;
+		addr_len = sizeof(struct sockaddr_in);
+		getsockname(sfd, (struct sockaddr *)&ipv4addr_local, &addr_len);
 	} else {
 		ipv6addr_remote = *(struct sockaddr_in6 *)result->ai_addr;
+		addr_len = sizeof(struct sockaddr_in6);
+		getsockname(sfd, (struct sockaddr *)&ipv6addr_local, &addr_len);
 	}
-
-	sfd = socket(af, result->ai_socktype, 0);
 	
 	unsigned char response[RESPONSE_SIZE];
 	if (sendto(sfd, first_request, FIRST_REQUEST_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, addr_len) < 0) {
@@ -105,16 +106,9 @@ int main(int argc, char *argv[]) {
 		memcpy(&opCode, &response[chunkLength+1], 1);
 		memcpy(&opParam, &response[chunkLength+2], 2);
 		memcpy(&nonce, &response[chunkLength+4], 4);
-		//opParam = ntohs(opParam);
 		nonce = ntohl(nonce);
-		++nonce;
+		nonce++;
 		nonce = htonl(nonce);
-
-		memcpy(&treasure[treasureIndex], &chunk, chunkLength);
-		treasureIndex += chunkLength;
-
-		unsigned char request[REQUEST_SIZE];
-		memcpy(&request, &nonce, 4);
 
 		switch (opCode) {
 			case 0:
@@ -129,10 +123,17 @@ int main(int argc, char *argv[]) {
 				bind(sfd, (struct sockaddr *) &ipv4addr_local, sizeof(struct sockaddr_in));
 				break;
 			case 3:
-				print_bytes(response, bytesRecieved);
-				printf("%ld\n", bytesRecieved);
+				nonce = 0;
 				opParam = ntohs(opParam);
-				printf("opParam: %d\n", opParam);
+				struct sockaddr_in getPorts = ipv4addr_remote;
+				for (int i=0; i<opParam; i++) {
+					if ((bytesRecieved = recvfrom(sfd, response, RESPONSE_SIZE, 0, (struct sockaddr *) &getPorts, &addr_len)) < 0) {
+						perror("recvfrom()");
+					}
+					nonce += ntohs(getPorts.sin_port);
+				}
+				nonce++;
+				nonce = htonl(nonce);
 				break;
 			case 4:
 				break;
@@ -141,6 +142,12 @@ int main(int argc, char *argv[]) {
 				break;
 		}
 
+		memcpy(&treasure[treasureIndex], &chunk, chunkLength);
+		treasureIndex += chunkLength;
+
+		unsigned char request[REQUEST_SIZE];
+		memcpy(&request, &nonce, 4);
+
 		if (sendto(sfd, request, REQUEST_SIZE, 0, (struct sockaddr *) &ipv4addr_remote, addr_len) < 0) {
 			perror("sendto()");
 		}
@@ -148,7 +155,7 @@ int main(int argc, char *argv[]) {
 			perror("recvfrom()");
 		}
 
-		// print_bytes(response, bytesRecieved);
+		//print_bytes(response, bytesRecieved);
 	}
 	while (chunkLength != 0);
 
