@@ -75,7 +75,9 @@ int main(int argc, char *argv[]) {
 
 	int af;
 	struct sockaddr_in ipv4addr_remote;
+	struct sockaddr_in ipv4addr_local;
 	struct sockaddr_in6 ipv6addr_remote;
+	struct sockaddr_in6 ipv6addr_local;
 
 	af = result->ai_family;
 	if (af == AF_INET) {
@@ -130,12 +132,15 @@ int main(int argc, char *argv[]) {
 			case 0:
 				break;
 			case 1:
-				sprintf(port, "%d", opParam);
 				ipv4addr_remote.sin_port = opParam;
 				break;
 			case 2:
+				close(sfd);
+				sfd = socket(af, result->ai_socktype, 0);
+				bind(sfd, (struct sockaddr *) &ipv4addr_local, sizeof(struct sockaddr_in));
 				break;
 			case 3:
+				
 				break;
 			case 4:
 				break;
