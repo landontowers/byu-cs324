@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <errno.h>
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
@@ -29,10 +30,13 @@ int main(int argc, char *argv[])
 	socklen_t remote_addr_len = sizeof(remote_addr);
 
 	int sfd = open_sfd(atoi(argv[1]));
+	int asfd;
 	while (1) {
-		accept(sfd, (struct sockaddr *)&remote_addr, &remote_addr_len);
-		handle_client(sfd);
-		return 0;
+		if ((asfd = accept(sfd, (struct sockaddr *)&remote_addr, &remote_addr_len)) < 0) {
+			printf("accept error: %d\n", errno); fflush(stdout);
+			break;
+		}		
+		handle_client(asfd);
 	}
 
 	return 0;
@@ -65,15 +69,98 @@ int open_sfd(int port) {
 
 void handle_client(int sfd) {
 	char buf[MAX_OBJECT_SIZE];
+	bzero(buf, MAX_OBJECT_SIZE);
 	int index=0;
 	int nread;
-	while(all_headers_received(buf) == 0) {
-		nread = recv(sfd, &buf[index], MAX_OBJECT_SIZE, 0);
+	do {
+		nread = recv(sfd, &buf[index], 10, 0);
+		if (nread < 0) {
+			printf("recv error: %d\n", errno); fflush(stdout);
+			break;
+		}
 		index += nread;
-		break;
+	} while(all_headers_received(buf) == 0);
+	//printf("Finished Reading:\n%s\n", buf);
+	//close(sfd);
+
+	char method[16], hostname[64], port[8], path[64], headers[1024];
+	if (parse_request(buf, method, hostname, port, path, headers)) {
+		char newRequest[MAX_OBJECT_SIZE];
+		strcat(newRequest, method);
+		strcat(newRequest, path);
+		strcat(newRequest, " HTTP/1.0\r\nHost: ");
+		strcat(newRequest, hostname);
+		if (strcmp(port, "80")) {
+			strcat(newRequest, ":");
+			strcat(newRequest, port);
+		}
+		strcat(newRequest, "\r\nUser-Agent: ");
+		strcat(newRequest, user_agent_hdr);
+		strcat(newRequest, "\r\nConnection: close\r\nProxy-Connection: close\r\n\r\n");
+		
+		// printf("%s\n", newRequest);
+
+		struct addrinfo hints;
+		struct addrinfo *result, *rp;
+		int s, sfd2;
+		memset(&hints, 0, sizeof(struct addrinfo));
+		hints.ai_family = AF_INET;    
+		hints.ai_socktype = SOCK_STREAM;
+
+		if ((s=getaddrinfo(hostname, port, &hints, &result)) != 0) {
+			fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
+			exit(EXIT_FAILURE);
+		}
+
+		for (rp = result; rp != NULL; rp = rp->ai_next) {
+			sfd2 = socket(AF_INET, SOCK_STREAM, 0);
+			if (sfd2 == -1)
+				continue;
+			if (connect(sfd2, rp->ai_addr, rp->ai_addrlen) != -1)
+				break;
+			close(sfd2);
+		}
+
+		if (rp == NULL) {   /* No address succeeded */
+			fprintf(stderr, "Could not connect\n");
+			exit(EXIT_FAILURE);
+		}
+
+		freeaddrinfo(result);
+
+		int offset = 0, bytesSent, bytesRead, totalBytesRead;
+		while (offset < sizeof(newRequest)) {
+			bytesSent = write(sfd2, newRequest+offset, 5);
+			offset += bytesSent;
+		}
+
+		char response[MAX_OBJECT_SIZE];
+		totalBytesRead = 0;
+		while ((bytesRead = read(sfd2, response+totalBytesRead, MAX_OBJECT_SIZE)) != 0){
+			if (bytesRead == -1) {
+				perror("read");
+				exit(EXIT_FAILURE);
+			}
+			totalBytesRead+=bytesRead;
+		}
+		// for (int i=0; i<totalBytesRead; i++) {
+		// 	printf("%c", (char) response[i]);
+		// }
+		// printf("\n"); fflush(stdout);
+
+		close(sfd2);
+
+		offset = 0;
+		while (offset < sizeof(response)) {
+			bytesSent = write(sfd, response+offset, 5);
+			offset += bytesSent;
+		}
+
+		close(sfd);
+
+	} else {
+		printf("REQUEST INCOMPLETE:\n%s\n\n", buf);
 	}
-	printf("Finished Reading:\n %s\n", buf);
-	close(sfd);
 }
 
 int all_headers_received(char *request) {
