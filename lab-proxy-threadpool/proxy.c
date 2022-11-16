@@ -6,10 +6,14 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <errno.h>
+#include <pthread.h>
+#include "sbuf.h"
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
+#define THREADCOUNT 8
+#define QUEUESIZE 5
 
 static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:97.0) Gecko/20100101 Firefox/97.0";
 
@@ -19,15 +23,23 @@ void test_parser();
 void print_bytes(unsigned char *, int);
 int open_sfd(int port);
 void handle_client(int sfd);
+void *thread();
 
+sbuf_t sbuf;
 
 int main(int argc, char *argv[])
 {
 	// test_parser();
-	printf("%s\n", user_agent_hdr);
+	// printf("%s\n", user_agent_hdr);
 
 	struct sockaddr_storage remote_addr;
 	socklen_t remote_addr_len = sizeof(remote_addr);
+	pthread_t tid;
+
+	sbuf_init(&sbuf, QUEUESIZE); 
+	for (int i=0; i<THREADCOUNT; i++) {
+		pthread_create(&tid, NULL, thread, NULL);
+	}
 
 	int sfd = open_sfd(atoi(argv[1]));
 	int asfd;
@@ -35,11 +47,18 @@ int main(int argc, char *argv[])
 		if ((asfd = accept(sfd, (struct sockaddr *)&remote_addr, &remote_addr_len)) < 0) {
 			printf("accept error: %d\n", errno); fflush(stdout);
 			break;
-		}		
-		handle_client(asfd);
+		}
+		sbuf_insert(&sbuf, asfd);
 	}
 
 	return 0;
+}
+
+void *thread(){
+	pthread_detach(pthread_self());
+	while (1) {
+		handle_client(sbuf_remove(&sbuf));
+	}
 }
 
 int open_sfd(int port) {
@@ -81,11 +100,11 @@ void handle_client(int sfd) {
 		index += nread;
 	} while(all_headers_received(buf) == 0);
 	//printf("Finished Reading:\n%s\n", buf);
-	//close(sfd);
 
 	char method[16], hostname[64], port[8], path[64], headers[1024];
 	if (parse_request(buf, method, hostname, port, path, headers)) {
 		char newRequest[MAX_OBJECT_SIZE];
+		bzero(newRequest, MAX_OBJECT_SIZE);
 		strcat(newRequest, method);
 		strcat(newRequest, path);
 		strcat(newRequest, " HTTP/1.0\r\nHost: ");
@@ -129,12 +148,13 @@ void handle_client(int sfd) {
 		freeaddrinfo(result);
 
 		int offset = 0, bytesSent, bytesRead, totalBytesRead;
-		while (offset < sizeof(newRequest)) {
-			bytesSent = write(sfd2, newRequest+offset, 5);
+		while (offset < strlen(newRequest)) {
+			bytesSent = write(sfd2, newRequest+offset, 1);
 			offset += bytesSent;
 		}
 
 		char response[MAX_OBJECT_SIZE];
+		bzero(response, MAX_OBJECT_SIZE);
 		totalBytesRead = 0;
 		while ((bytesRead = read(sfd2, response+totalBytesRead, MAX_OBJECT_SIZE)) != 0){
 			if (bytesRead == -1) {
@@ -151,8 +171,8 @@ void handle_client(int sfd) {
 		close(sfd2);
 
 		offset = 0;
-		while (offset < sizeof(response)) {
-			bytesSent = write(sfd, response+offset, 5);
+		while (offset < totalBytesRead) {
+			bytesSent = write(sfd, response+offset, 1);
 			offset += bytesSent;
 		}
 
