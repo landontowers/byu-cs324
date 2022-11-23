@@ -1,4 +1,10 @@
 /*
+Landon Towers
+
+*/
+
+
+/*
   This program is an adaptation of the Mandelbrot program
   from the Programming Rosetta Stone, see
   http://rosettacode.org/wiki/Mandelbrot_set
@@ -35,6 +41,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdint.h>
+#include <omp.h>
 
 int main(int argc, char* argv[])
 {
@@ -80,6 +87,9 @@ int main(int argc, char* argv[])
   int k; /* Iteration counter */
   int *saved = malloc(sizeof(int)*yres*xres);
 
+  int start = omp_get_wtime();
+
+  #pragma omp parallel for firstprivate(x,y) private(i,k)
   for (j = 0; j < yres; j++) {
     y = ymax - j * dy;
     for(i = 0; i < xres; i++) {
@@ -98,6 +108,8 @@ int main(int argc, char* argv[])
       saved[xres * j + i] = k;
     }
   }
+  int end = omp_get_wtime();
+  printf("Time Elapsed: %d\n", end-start); fflush(stdout);
 
   for (j = 0; j < yres; j++) {
     for(i = 0; i < xres; i++) {

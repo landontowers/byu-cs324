@@ -1,0 +1,20 @@
+Threads: Loop Time Elapsed / Total Time Elapsed:
+1:       32s                 36.37s
+2:       17s                 21.19s
+4:       10s                 14.15s
+8:       5s                  9.59s
+16:      3s                  7.89s
+32:      3s                  7.25s
+
+Questions:
+1.  20 cores
+2.  It roughly halves as threads double.
+3.  
+4.  32 threads
+5.  There were more threads than cores, so it wasn't actually using 32 threads.
+6.  
+7.  
+8.  We only used multithreading on one set of nested for loops, whereas the for loop computing pixel color is still single threaded, reducing the overall efficiency.
+9.  
+10. 
+
