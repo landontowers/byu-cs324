@@ -1,6 +1,25 @@
 /*
 Landon Towers
 
+Threads: Loop Time Elapsed / Total Time Elapsed:
+1:       32s                 36.37s
+2:       17s                 21.19s
+4:       10s                 14.15s
+8:       5s                  9.59s
+16:      3s                  7.89s
+32:      3s                  7.25s
+
+Questions:
+1.  20 cores
+2.  It roughly halves as threads double.
+3.  3.2
+4.  32 threads
+5.  There were more threads than cores, so it wasn't actually running 32 simultaneously.
+6.  36.37 / 14.15 = 2.57
+7.  36.37 / (4 * 14.15) = 0.64 -> 64%
+8.  The overhead of maintaining parallelization makes each new thread cause a hit to the performance of all threads. Thus, the efficiency is less than 100%.
+9.  89%
+10. 4.05
 */
 
 
