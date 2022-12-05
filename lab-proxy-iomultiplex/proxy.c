@@ -1,31 +1,221 @@
+#include <sys/types.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/epoll.h>
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
 
-static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:97.0) Gecko/20100101 Firefox/97.0";
+// static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:97.0) Gecko/20100101 Firefox/97.0";
+struct request_info {
+	int client_socket;
+	int server_socket;
+	int state;
+	char buf[MAX_OBJECT_SIZE];
+	int client_bytes_read;
+	int client_bytes_written;
+	int server_bytes_to_write;
+	int server_bytes_written;
+	int server_bytes_read;
+};
 
 int all_headers_received(char *);
 int parse_request(char *, char *, char *, char *, char *, char *);
 void test_parser();
 void print_bytes(unsigned char *, int);
+int open_sfd(int port);
+void handle_new_clients(int epoll_fd, int socket_fd);
+void handle_client(struct request_info * request);
 
+enum State { READ_REQUEST, SEND_REQUEST, READ_RESPONSE, SEND_RESPONSE };
 
-int main()
+int main(int argc, char *argv[])
 {
-	test_parser();
-	printf("%s\n", user_agent_hdr);
+	// test_parser();
+	// printf("%s\n", user_agent_hdr);
+
+	int epoll_fd = epoll_create1(0);
+	int socket_fd = open_sfd(atoi(argv[1]));
+	struct epoll_event events;
+	events.events = EPOLLIN | EPOLLET;
+	events.data.fd = socket_fd;
+	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, socket_fd, &events) < 0) {
+		printf("epoll_ctl error (1):  %s\n", strerror(errno)); fflush(stdout);
+	}
+
+	while(1) {
+		int wait_result = epoll_wait(epoll_fd, &events, 10, 1000);
+		if (wait_result == 0) {
+			continue;
+		} else if (wait_result < 0) {
+			printf("epoll_wait error:  %s\n", strerror(errno)); fflush(stdout);
+			break;
+		} else {
+			printf("events.data.fd: %d\n", events.data.fd);
+			// if () {
+
+			// } else {
+				handle_new_clients(epoll_fd, socket_fd);
+			// }
+		}
+	}
+	
+
+
 	return 0;
+}
+
+int open_sfd(int port) {
+	int epoll_fd;
+	struct sockaddr_in ipv4addr;
+	memset(&ipv4addr, 0, sizeof(struct sockaddr_in));
+	ipv4addr.sin_family = AF_INET;
+	ipv4addr.sin_addr.s_addr = INADDR_ANY;
+	ipv4addr.sin_port = htons(port);
+
+	if ((epoll_fd = socket(AF_INET, SOCK_STREAM, 0)) < -1) {
+		perror("Error creating socket");
+		exit(EXIT_FAILURE);
+	}
+	int optval = 1;
+	setsockopt(epoll_fd, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval));
+
+	fcntl(epoll_fd, F_SETFL, O_NONBLOCK);
+
+	if (bind(epoll_fd, (struct sockaddr *)&ipv4addr, sizeof(struct sockaddr)) < 0) {
+		perror("Could not bind");
+		exit(EXIT_FAILURE);
+	}
+
+	listen(epoll_fd, 100);
+	printf("Listening on port %d\n", ntohs(ipv4addr.sin_port)); fflush(stdout);
+
+	return epoll_fd;
+}
+
+void handle_new_clients(int epoll_fd, int socket_fd) {
+	int new_fd;
+	struct sockaddr_storage remote_addr;
+	socklen_t remote_addr_len = sizeof(remote_addr);
+	while (1) {
+		new_fd = accept(socket_fd, (struct sockaddr *)&remote_addr, &remote_addr_len);
+		if (new_fd < 0) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				break;
+			} else {
+				printf("accept error: %s\n", strerror(errno)); fflush(stdout);
+				exit(EXIT_FAILURE);
+			}
+		}
+
+		fcntl(new_fd, F_SETFL, O_NONBLOCK);
+		struct epoll_event events;
+		events.events = EPOLLIN | EPOLLET;
+		events.data.fd = new_fd;
+		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_fd, &events) < 0) {
+			printf("epoll_ctl error (2):  %s\n", strerror(errno)); fflush(stdout);
+		}
+
+		printf("New Client FD: %d\n", new_fd); fflush(stdout);
+		printf("1 events.data.fd: %d\n", events.data.fd);
+	}
+}
+
+void handle_client(struct request_info * request) {
+	switch (request->state) {
+		case READ_REQUEST:
+			printf("READ_REQUEST");
+			break;
+		case SEND_REQUEST:
+			printf("SEND_REQUEST");
+			break;
+		case READ_RESPONSE:
+			printf("READ_RESPONSE");
+			break;
+		case SEND_RESPONSE:
+			printf("SEND_RESPONSE");
+			break;
+		default:
+			printf("Unknown state: %d\n", request->state); fflush(stdout);
+	}
 }
 
 int all_headers_received(char *request) {
-	return 0;
+	return strstr(request, "\r\n\r\n") == NULL ? 0 : 1;
 }
 
-int parse_request(char *request, char *method,
-		char *hostname, char *port, char *path, char *headers) {
-	return 0;
+int parse_request(char *request, char *method, char *hostname, char *port, char *path, char *headers) {
+	if (all_headers_received(request) == 0)
+		return 0;
+
+	bzero(method, 16);
+	bzero(hostname, 64);
+	bzero(port, 8);
+	bzero(path, 64);
+	bzero(headers, 1024);
+
+	char * indexPtr = request;
+	char * endPtr;
+	int length;
+
+	// METHOD
+	endPtr = strstr(request, " ");
+	length = endPtr - request;
+	memcpy(method, request, length+1);
+
+	// URL
+	char URL[136];
+	memset(URL, 0, 136);
+	indexPtr = strstr(endPtr, "/")+2;
+	endPtr = strstr(endPtr+1, " ");
+	length = endPtr - indexPtr;
+	memcpy(URL, indexPtr, length);
+	
+	// HOSTNAME
+	if ((endPtr = strstr(URL, ":")) != NULL) {
+		length = endPtr - URL;
+		memcpy(hostname, URL, length);
+	} else {
+		if ((endPtr = strstr(URL, "/")) != NULL) {
+			length = endPtr - URL;
+			memcpy(hostname, URL, length);
+		} else {
+			printf("Error parsing hostname.\n"); fflush(stdout);
+		}
+	}
+
+	// PORT
+	indexPtr = strstr(URL, ":");
+	if (indexPtr == NULL) {
+		char * defaultPort = "80";
+		memcpy(port, defaultPort, 2);
+	} else {
+		indexPtr++;
+		endPtr = strstr(indexPtr, "/");
+		length = endPtr - indexPtr;
+		memcpy(port, indexPtr, length);
+	}
+
+	// PATH
+	indexPtr = strstr(URL, "/");
+	endPtr = &URL[strlen(URL)];
+	length = endPtr - indexPtr;
+	memcpy(path, indexPtr, length);
+
+	// HEADERS
+	indexPtr = strstr(request, "\r\n")+2;
+	endPtr = strstr(request, "\r\n\r\n");
+	length = endPtr - indexPtr;
+	memcpy(headers, indexPtr, length);
+
+	return 1;
 }
 
 void test_parser() {
