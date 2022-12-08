@@ -12,6 +12,8 @@
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
+#define MAXEVENTS 64
+#define MAXLINE 2048
 
 // static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:97.0) Gecko/20100101 Firefox/97.0";
 struct request_info {
@@ -26,6 +28,11 @@ struct request_info {
 	int server_bytes_read;
 };
 
+struct client_info {
+	int fd;
+	char desc[100];
+};
+
 int all_headers_received(char *);
 int parse_request(char *, char *, char *, char *, char *, char *);
 void test_parser();
@@ -38,32 +45,62 @@ enum State { READ_REQUEST, SEND_REQUEST, READ_RESPONSE, SEND_RESPONSE };
 
 int main(int argc, char *argv[])
 {
-	// test_parser();
-	// printf("%s\n", user_agent_hdr);
+	int epoll_fd, socket_fd;
+	struct epoll_event event, *events;
 
-	int epoll_fd = epoll_create1(0);
-	int socket_fd = open_sfd(atoi(argv[1]));
-	struct epoll_event events;
-	events.events = EPOLLIN | EPOLLET;
-	events.data.fd = socket_fd;
-	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, socket_fd, &events) < 0) {
+	if ((epoll_fd = epoll_create1(0)) < 0) {
+		fprintf(stderr, "error creating epoll fd\n");
+		exit(1);
+	}
+
+	socket_fd = open_sfd(atoi(argv[1]));
+
+	event.events = EPOLLIN | EPOLLET;
+	event.data.fd = socket_fd;
+	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, socket_fd, &event) < 0) {
 		printf("epoll_ctl error (1):  %s\n", strerror(errno)); fflush(stdout);
 	}
 
+	events = calloc(MAXEVENTS, sizeof(event));
+
 	while(1) {
-		int wait_result = epoll_wait(epoll_fd, &events, 10, 1000);
+		int wait_result = epoll_wait(epoll_fd, events, 10, 1000);
 		if (wait_result == 0) {
 			continue;
 		} else if (wait_result < 0) {
 			printf("epoll_wait error:  %s\n", strerror(errno)); fflush(stdout);
 			break;
 		} else {
-			printf("events.data.fd: %d\n", events.data.fd);
-			// if () {
+			for (int i=0; i<wait_result; i++) {
+				if ((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP) || (events[i].events & EPOLLRDHUP)) {
+					/* An error has occured on this fd */
+					fprintf (stderr, "epoll error");
+					close(events[i].data.fd);
+					continue;
+				}
 
-			// } else {
-				handle_new_clients(epoll_fd, socket_fd);
-			// }
+				if (0 == events[i].data.fd) {
+					printf("(1) events[%d].data.fd == %d\n", i, events[i].data.fd); 
+				}
+				else if (socket_fd == events[i].data.fd) {
+					printf("New Client\n"); 
+					handle_new_clients(epoll_fd, socket_fd);
+				} else {
+					printf("Existing Client\n"); 
+					struct request_info req_info = {
+						.client_socket = events[i].data.fd,
+						.server_socket = socket_fd,
+						.state = READ_REQUEST,
+						.client_bytes_read = 0,
+						.client_bytes_written = 0,
+						.server_bytes_to_write = 0,
+						.server_bytes_written = 0,
+						.server_bytes_read = 0
+					};
+					handle_client(&req_info);
+				}
+				fflush(stdout);
+			}
 		}
 	}
 	
@@ -124,26 +161,50 @@ void handle_new_clients(int epoll_fd, int socket_fd) {
 		}
 
 		printf("New Client FD: %d\n", new_fd); fflush(stdout);
-		printf("1 events.data.fd: %d\n", events.data.fd);
 	}
 }
 
-void handle_client(struct request_info * request) {
-	switch (request->state) {
+void handle_client(struct request_info * req) {
+	switch (req->state) {
 		case READ_REQUEST:
-			printf("READ_REQUEST");
+			printf("READ_REQUEST\n");
+
+			int n_read;
+			unsigned char buf[MAXLINE]; 
+
+			do {
+				n_read = recv(req->client_socket, buf+req->client_bytes_read, MAXLINE, 0);
+
+				if (n_read == 0) {
+					close(req->client_socket);
+				} else if (n_read < 0) {
+					if (errno == EWOULDBLOCK || errno == EAGAIN) {
+						// no more data to be read
+					} else {
+						perror("client recv");
+						close(req->client_socket);
+					}
+				} else {
+					printf("Received %d bytes\n", n_read);
+					req->client_bytes_read += n_read;
+					printf("%s\n", buf);
+				}
+			} while (n_read > 0);
+
+			req->state = SEND_REQUEST;
+
 			break;
 		case SEND_REQUEST:
-			printf("SEND_REQUEST");
+			printf("SEND_REQUEST\n");
 			break;
 		case READ_RESPONSE:
-			printf("READ_RESPONSE");
+			printf("READ_RESPONSE\n");
 			break;
 		case SEND_RESPONSE:
-			printf("SEND_RESPONSE");
+			printf("SEND_RESPONSE\n");
 			break;
 		default:
-			printf("Unknown state: %d\n", request->state); fflush(stdout);
+			printf("Unknown state: %d\n", req->state); fflush(stdout);
 	}
 }
 
