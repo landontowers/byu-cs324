@@ -15,7 +15,7 @@
 #define MAXEVENTS 64
 #define MAXLINE 2048
 
-// static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:97.0) Gecko/20100101 Firefox/97.0";
+static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:97.0) Gecko/20100101 Firefox/97.0";
 typedef struct request_info {
 	int client_socket;
 	int server_socket;
@@ -35,6 +35,10 @@ void print_bytes(unsigned char *, int);
 int open_sfd(int port);
 void handle_new_clients(int epoll_fd, int socket_fd);
 void handle_client(struct request_info * request);
+void handle_client_READ_REQUEST(struct request_info * req);
+void handle_client_SEND_REQUEST(struct request_info * req);
+void handle_client_READ_RESPONSE(struct request_info * req);
+void handle_client_SEND_RESPONSE(struct request_info * req);
 
 enum State { READ_REQUEST, SEND_REQUEST, READ_RESPONSE, SEND_RESPONSE };
 
@@ -88,8 +92,6 @@ int main(int argc, char *argv[])
 			}
 		}
 	}
-	
-
 
 	return 0;
 }
@@ -168,38 +170,100 @@ void handle_client(struct request_info * req) {
 	switch (req->state) {
 		case READ_REQUEST:
 			printf("READ_REQUEST\n");
-
-			int n_read = recv(req->client_socket, &req->buf[req->client_bytes_read], MAXLINE, 0);
-
-			if (n_read == 0) {
-				printf("Done reading request\n");
-				req->state = SEND_REQUEST;
-				// close(req->client_socket);
-			} else if (n_read < 0) {
-				if (errno == EWOULDBLOCK || errno == EAGAIN) {
-					// no more data to be read
-				} else {
-					perror("client recv");
-					close(req->client_socket);
-				}
-			} else {
-				printf("Received %d bytes\n", n_read);
-				printf("%s\n", req->buf);
-				req->client_bytes_read += n_read;
-			}
+			handle_client_READ_REQUEST(req);
 			break;
 		case SEND_REQUEST:
 			printf("SEND_REQUEST\n");
+			handle_client_SEND_REQUEST(req);
 			break;
 		case READ_RESPONSE:
 			printf("READ_RESPONSE\n");
+			handle_client_READ_RESPONSE(req);
 			break;
 		case SEND_RESPONSE:
 			printf("SEND_RESPONSE\n");
+			handle_client_SEND_RESPONSE(req);
 			break;
 		default:
 			printf("Unknown state: %d\n", req->state); fflush(stdout);
 	}
+}
+
+void handle_client_READ_REQUEST(struct request_info * req) {
+	int n_read = recv(req->client_socket, &req->buf[req->client_bytes_read], MAXLINE, 0);
+
+	if (n_read == 0) {
+		req->state = SEND_REQUEST;
+		handle_client(req);
+		// close(req->client_socket);
+	} else if (n_read < 0) {
+		if (errno == EWOULDBLOCK || errno == EAGAIN) {
+			// no more data to be read
+		} else {
+			perror("client recv");
+			close(req->client_socket);
+		}
+	} else {
+		printf("Received %d bytes\n", n_read);
+		printf("%s\n", req->buf);
+		req->client_bytes_read += n_read;
+	}
+}
+
+void handle_client_SEND_REQUEST(struct request_info * req) {
+	int server_socket_copy = req->server_socket;
+	char method[16], hostname[64], port[8], path[64], headers[1024];
+	if (parse_request(req->buf, method, hostname, port, path, headers)) {
+		char newRequest[MAX_OBJECT_SIZE];
+		bzero(newRequest, MAX_OBJECT_SIZE);
+		strcat(newRequest, method);
+		strcat(newRequest, path);
+		strcat(newRequest, " HTTP/1.0\r\nHost: ");
+		strcat(newRequest, hostname);
+		if (strcmp(port, "80")) {
+			strcat(newRequest, ":");
+			strcat(newRequest, port);
+		}
+		strcat(newRequest, "\r\nUser-Agent: ");
+		strcat(newRequest, user_agent_hdr);
+		strcat(newRequest, "\r\nConnection: close\r\nProxy-Connection: close\r\n\r\n");
+
+		req->server_bytes_to_write = strlen(newRequest);
+		req->server_bytes_written = 0;
+		req->server_socket = server_socket_copy;
+		int n_sent;
+		while (req->server_bytes_written < req->server_bytes_to_write) {
+			printf("server_socket: %d\n", req->server_socket);
+			printf("server_bytes_written: %d\n", req->server_bytes_written);
+			printf("server_bytes_to_write: %d\n", req->server_bytes_to_write);
+			n_sent = write(req->server_socket, &newRequest[req->server_bytes_written], 1);
+			req->server_bytes_written += n_sent;
+		}
+
+		req->state = READ_RESPONSE;
+		handle_client(req);
+	} else {
+		printf("REQUEST INCOMPLETE:\n%s\n\n", req->buf);
+	}
+
+}
+
+void handle_client_READ_RESPONSE(struct request_info * req) {
+	bzero(req->buf, MAX_OBJECT_SIZE);
+	int n_read;
+	printf("%d\n", req->server_socket);
+	while ((n_read = read(req->server_socket, &req->buf[req->server_bytes_read], MAX_OBJECT_SIZE)) != 0){
+		if (n_read == -1) {
+			perror("read");
+			exit(EXIT_FAILURE);
+		}
+		req->server_bytes_read += n_read;
+	}
+	handle_client(req);
+}
+
+void handle_client_SEND_RESPONSE(struct request_info * req) {
+
 }
 
 int all_headers_received(char *request) {
