@@ -16,22 +16,17 @@
 #define MAXLINE 2048
 
 // static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:97.0) Gecko/20100101 Firefox/97.0";
-struct request_info {
+typedef struct request_info {
 	int client_socket;
 	int server_socket;
 	int state;
-	char buf[MAX_OBJECT_SIZE];
 	int client_bytes_read;
 	int client_bytes_written;
 	int server_bytes_to_write;
 	int server_bytes_written;
 	int server_bytes_read;
-};
-
-struct client_info {
-	int fd;
-	char desc[100];
-};
+	char buf[MAX_OBJECT_SIZE];
+} request_info;
 
 int all_headers_received(char *);
 int parse_request(char *, char *, char *, char *, char *, char *);
@@ -86,18 +81,8 @@ int main(int argc, char *argv[])
 					printf("New Client\n"); 
 					handle_new_clients(epoll_fd, socket_fd);
 				} else {
-					printf("Existing Client\n"); 
-					struct request_info req_info = {
-						.client_socket = events[i].data.fd,
-						.server_socket = socket_fd,
-						.state = READ_REQUEST,
-						.client_bytes_read = 0,
-						.client_bytes_written = 0,
-						.server_bytes_to_write = 0,
-						.server_bytes_written = 0,
-						.server_bytes_read = 0
-					};
-					handle_client(&req_info);
+					printf("Existing Client\n");
+					handle_client(events[i].data.ptr);
 				}
 				fflush(stdout);
 			}
@@ -152,11 +137,26 @@ void handle_new_clients(int epoll_fd, int socket_fd) {
 			}
 		}
 
-		fcntl(new_fd, F_SETFL, O_NONBLOCK);
-		struct epoll_event events;
-		events.events = EPOLLIN | EPOLLET;
-		events.data.fd = new_fd;
-		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_fd, &events) < 0) {
+		if (fcntl(new_fd, F_SETFL, O_NONBLOCK) < 0) {
+			fprintf(stderr, "error setting socket option\n");
+			exit(1);
+		}
+
+		struct epoll_event event;
+		event.events = EPOLLIN | EPOLLET;
+		request_info req_info = {
+			.client_socket = new_fd,
+			.server_socket = socket_fd,
+			.state = READ_REQUEST,
+			.client_bytes_read = 0,
+			.client_bytes_written = 0,
+			.server_bytes_to_write = 0,
+			.server_bytes_written = 0,
+			.server_bytes_read = 0
+		};
+		event.data.ptr = &req_info;
+
+		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_fd, &event) < 0) {
 			printf("epoll_ctl error (2):  %s\n", strerror(errno)); fflush(stdout);
 		}
 
@@ -169,30 +169,24 @@ void handle_client(struct request_info * req) {
 		case READ_REQUEST:
 			printf("READ_REQUEST\n");
 
-			int n_read;
-			unsigned char buf[MAXLINE]; 
+			int n_read = recv(req->client_socket, &req->buf[req->client_bytes_read], MAXLINE, 0);
 
-			do {
-				n_read = recv(req->client_socket, buf+req->client_bytes_read, MAXLINE, 0);
-
-				if (n_read == 0) {
-					close(req->client_socket);
-				} else if (n_read < 0) {
-					if (errno == EWOULDBLOCK || errno == EAGAIN) {
-						// no more data to be read
-					} else {
-						perror("client recv");
-						close(req->client_socket);
-					}
+			if (n_read == 0) {
+				printf("Done reading request\n");
+				req->state = SEND_REQUEST;
+				// close(req->client_socket);
+			} else if (n_read < 0) {
+				if (errno == EWOULDBLOCK || errno == EAGAIN) {
+					// no more data to be read
 				} else {
-					printf("Received %d bytes\n", n_read);
-					req->client_bytes_read += n_read;
-					printf("%s\n", buf);
+					perror("client recv");
+					close(req->client_socket);
 				}
-			} while (n_read > 0);
-
-			req->state = SEND_REQUEST;
-
+			} else {
+				printf("Received %d bytes\n", n_read);
+				printf("%s\n", req->buf);
+				req->client_bytes_read += n_read;
+			}
 			break;
 		case SEND_REQUEST:
 			printf("SEND_REQUEST\n");
