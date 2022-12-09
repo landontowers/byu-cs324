@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/epoll.h>
+#include  <signal.h>
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
@@ -43,8 +44,20 @@ void print_request_info(struct request_info * req);
 
 enum State { READ_REQUEST, SEND_REQUEST, READ_RESPONSE, SEND_RESPONSE };
 
+int interrupt_received = 0;
+
+void sigint_handler(int sig) {
+	printf("INTERRUPT RECEIVED\n");
+	interrupt_received = 1;
+}
+
 int main(int argc, char *argv[])
 {
+	struct sigaction sigact;
+	sigact.sa_flags = SA_RESTART;
+	sigact.sa_handler = sigint_handler;
+	sigaction(SIGINT, &sigact, NULL);
+
 	int epoll_fd, socket_fd;
 	struct epoll_event event, *events;
 
@@ -66,31 +79,33 @@ int main(int argc, char *argv[])
 	while(1) {
 		int wait_result = epoll_wait(epoll_fd, events, MAXEVENTS, 1000);
 		if (wait_result == 0) {
+			if (interrupt_received) {
+				break;
+			}
 			continue;
 		} else if (wait_result < 0) {
 			printf("epoll_wait error:  %s\n", strerror(errno)); fflush(stdout);
 			break;
-		} else {
-			for (int i=0; i<wait_result; i++) {
-				if ((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP) || (events[i].events & EPOLLRDHUP)) {
-					/* An error has occured on this fd */
-					fprintf (stderr, "epoll error");
-					close(events[i].data.fd);
-					continue;
-				}
-
-				if (0 == events[i].data.fd) {
-					printf("(1) events[%d].data.fd == %d\n", i, events[i].data.fd); 
-				}
-				else if (socket_fd == events[i].data.fd) {
-					// printf("New Client\n"); 
-					handle_new_clients(epoll_fd, socket_fd);
-				} else {
-					// printf("Existing Client\n");
-					handle_client(events[i].data.ptr, epoll_fd);
-				}
-				fflush(stdout);
+		}
+		for (int i=0; i<wait_result; i++) {
+			if ((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP) || (events[i].events & EPOLLRDHUP)) {
+				/* An error has occured on this fd */
+				fprintf (stderr, "epoll error");
+				close(events[i].data.fd);
+				continue;
 			}
+
+			if (0 == events[i].data.fd) {
+				printf("(1) events[%d].data.fd == %d\n", i, events[i].data.fd); 
+			}
+			else if (socket_fd == events[i].data.fd) {
+				// printf("New Client\n"); 
+				handle_new_clients(epoll_fd, socket_fd);
+			} else {
+				// printf("Existing Client\n");
+				handle_client(events[i].data.ptr, epoll_fd);
+			}
+			fflush(stdout);
 		}
 	}
 
@@ -119,7 +134,7 @@ int open_sfd(int port) {
 		exit(EXIT_FAILURE);
 	}
 
-	listen(socket_fd, 100);
+	listen(socket_fd, MAXEVENTS);
 	printf("Listening on port %d\n", ntohs(ipv4addr.sin_port)); fflush(stdout);
 
 	return socket_fd;
@@ -193,82 +208,89 @@ void handle_client(struct request_info * req, int epoll_fd) {
 void handle_client_READ_REQUEST(struct request_info * req, int epoll_fd) {
 	int n_read;
 	int client_socket_backup = req->client_socket;
+	int client_bytes_read_backup = req->client_bytes_read;
+	printf("client_socket: %d\n", client_socket_backup);
 
-	while ((n_read = recv(req->client_socket, &req->buf[req->client_bytes_read], MAXLINE, 0)) > 0) {
+	while ((n_read = recv(client_socket_backup, &req->buf[client_bytes_read_backup], MAXLINE, 0)) > 0) {
 		printf("Received %d bytes\n", n_read);
-		req->client_bytes_read += n_read;
+		client_bytes_read_backup += n_read;
+		req->client_bytes_read = client_bytes_read_backup;
+		if (all_headers_received(req->buf)) {
+			printf("ALL HEADERS RECEIVED\n");
+			char method[16], hostname[64], port[8], path[64], headers[1024], newRequest[MAX_OBJECT_SIZE];
+			if (parse_request(req->buf, method, hostname, port, path, headers)) {
+				bzero(newRequest, MAX_OBJECT_SIZE);
+				strcat(newRequest, method);
+				strcat(newRequest, path);
+				strcat(newRequest, " HTTP/1.0\r\nHost: ");
+				strcat(newRequest, hostname);
+				if (strcmp(port, "80")) {
+					strcat(newRequest, ":");
+					strcat(newRequest, port);
+				}
+				strcat(newRequest, "\r\nUser-Agent: ");
+				strcat(newRequest, user_agent_hdr);
+				strcat(newRequest, "\r\nConnection: close\r\nProxy-Connection: close\r\n\r\n");
+			} else {
+				printf("REQUEST INCOMPLETE:\n%s\n\n", req->buf);
+				exit(EXIT_FAILURE);
+			}
+			sprintf(req->buf, "%s", newRequest);
+
+			struct addrinfo hints;
+			struct addrinfo *result, *rp;
+			int s, sfd2;
+			memset(&hints, 0, sizeof(struct addrinfo));
+			hints.ai_family = AF_INET;
+			hints.ai_socktype = SOCK_STREAM;
+
+			if ((s=getaddrinfo(hostname, port, &hints, &result)) != 0) {
+				fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
+				exit(EXIT_FAILURE);
+			}
+
+			for (rp = result; rp != NULL; rp = rp->ai_next) {
+				sfd2 = socket(AF_INET, SOCK_STREAM, 0);
+				if (sfd2 == -1)
+					continue;
+				if (connect(sfd2, rp->ai_addr, rp->ai_addrlen) != -1)
+					break;
+				close(sfd2);
+			}
+
+			if (rp == NULL) {   /* No address succeeded */
+				fprintf(stderr, "Could not connect\n");
+				exit(EXIT_FAILURE);
+			}
+
+			freeaddrinfo(result);
+
+			fcntl(sfd2, F_SETFL, fcntl(sfd2, F_GETFL, 0) | O_NONBLOCK);
+
+			req->server_bytes_to_write = (int) strlen(newRequest);
+			req->state = SEND_REQUEST;
+			req->server_socket = sfd2;
+			req->server_bytes_written = 0;
+			req->client_socket = client_socket_backup;
+
+			struct epoll_event event;
+			event.events = EPOLLOUT | EPOLLET;
+			event.data.fd = sfd2;
+			event.data.ptr = req;
+			if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sfd2, &event) < 0) {
+				printf("epoll_ctl error (1):  %s\n", strerror(errno)); fflush(stdout);
+			}
+			req->client_socket = client_socket_backup;
+		}
 	}
 	if (n_read < 0) {
 		if (errno == EWOULDBLOCK || errno == EAGAIN) {
 			// no more data to be read
+			printf("errno set:  %s\n", strerror(errno)); fflush(stdout);
 			printf("Try again later...\n");
 		} else {
 			perror("client recv");
-			close(req->client_socket);
-		}
-	} else {
-		char method[16], hostname[64], port[8], path[64], headers[1024], newRequest[MAX_OBJECT_SIZE];
-		if (parse_request(req->buf, method, hostname, port, path, headers)) {
-			bzero(newRequest, MAX_OBJECT_SIZE);
-			strcat(newRequest, method);
-			strcat(newRequest, path);
-			strcat(newRequest, " HTTP/1.0\r\nHost: ");
-			strcat(newRequest, hostname);
-			if (strcmp(port, "80")) {
-				strcat(newRequest, ":");
-				strcat(newRequest, port);
-			}
-			strcat(newRequest, "\r\nUser-Agent: ");
-			strcat(newRequest, user_agent_hdr);
-			strcat(newRequest, "\r\nConnection: close\r\nProxy-Connection: close\r\n\r\n");
-		} else {
-			printf("REQUEST INCOMPLETE:\n%s\n\n", req->buf);
-			exit(EXIT_FAILURE);
-		}
-		sprintf(req->buf, "%s", newRequest);
-
-		struct addrinfo hints;
-		struct addrinfo *result, *rp;
-		int s, sfd2;
-		memset(&hints, 0, sizeof(struct addrinfo));
-		hints.ai_family = AF_INET;
-		hints.ai_socktype = SOCK_STREAM;
-
-		if ((s=getaddrinfo(hostname, port, &hints, &result)) != 0) {
-			fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
-			exit(EXIT_FAILURE);
-		}
-
-		for (rp = result; rp != NULL; rp = rp->ai_next) {
-			sfd2 = socket(AF_INET, SOCK_STREAM, 0);
-			if (sfd2 == -1)
-				continue;
-			if (connect(sfd2, rp->ai_addr, rp->ai_addrlen) != -1)
-				break;
-			close(sfd2);
-		}
-
-		if (rp == NULL) {   /* No address succeeded */
-			fprintf(stderr, "Could not connect\n");
-			exit(EXIT_FAILURE);
-		}
-
-		freeaddrinfo(result);
-
-		fcntl(sfd2, F_SETFL, fcntl(sfd2, F_GETFL, 0) | O_NONBLOCK);
-
-		req->server_bytes_to_write = (int) strlen(newRequest);
-		req->state = SEND_REQUEST;
-		req->server_socket = sfd2;
-		req->server_bytes_written = 0;
-		req->client_socket = client_socket_backup;
-
-		struct epoll_event event;
-		event.events = EPOLLOUT | EPOLLET;
-		event.data.fd = sfd2;
-		event.data.ptr = req;
-		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sfd2, &event) < 0) {
-			printf("epoll_ctl error (1):  %s\n", strerror(errno)); fflush(stdout);
+			close(client_socket_backup);
 		}
 	}
 }
@@ -330,18 +352,18 @@ void handle_client_READ_RESPONSE(struct request_info * req, int epoll_fd) {
 		if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, req->client_socket, &event) < 0) {
 			printf("epoll_ctl error (1):  %s\n", strerror(errno)); fflush(stdout);
 		}
+		close(req->server_socket);
 	}
 }
 
 void handle_client_SEND_RESPONSE(struct request_info * req, int epoll_fd) {
 	int client_socket = req->client_socket;
 	print_request_info(req);
-	int to_send = strlen(req->buf)+1, n_sent;
+	int to_send = req->server_bytes_read, n_sent;
 	printf("to_send: %d\n", to_send);
 	req->client_bytes_written = 0;
 	while (req->client_bytes_written < to_send) {
-		printf("client socket: %d\n", client_socket);
-		printf("written: %d\n",req->client_bytes_written);
+		// printf("written: %d\n",req->client_bytes_written);
 		if ((n_sent = write(client_socket, &req->buf[req->client_bytes_written], 1)) < 0) {
 			perror("write");
 			exit(EXIT_FAILURE);
@@ -349,6 +371,7 @@ void handle_client_SEND_RESPONSE(struct request_info * req, int epoll_fd) {
 		req->client_bytes_written += n_sent;
 	}
 	printf("client_bytes_written: %d\n", req->client_bytes_written);
+	close(req->client_socket);
 }
 
 int all_headers_received(char *request) {
