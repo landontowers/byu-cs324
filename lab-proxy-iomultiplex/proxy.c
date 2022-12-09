@@ -286,7 +286,6 @@ void handle_client_READ_REQUEST(struct request_info * req, int epoll_fd) {
 	if (n_read < 0) {
 		if (errno == EWOULDBLOCK || errno == EAGAIN) {
 			// no more data to be read
-			printf("errno set:  %s\n", strerror(errno)); fflush(stdout);
 			printf("Try again later...\n");
 		} else {
 			perror("client recv");
@@ -297,15 +296,18 @@ void handle_client_READ_REQUEST(struct request_info * req, int epoll_fd) {
 
 void handle_client_SEND_REQUEST(struct request_info * req, int epoll_fd) {
 	int n_sent;
+	int server_socket_backup = req->server_socket;
 	while (req->server_bytes_written < req->server_bytes_to_write) {
-		if ((n_sent = write(req->server_socket, &req->buf[req->server_bytes_written], 1)) < 0) {
+		if ((n_sent = write(server_socket_backup, &req->buf[req->server_bytes_written], 1)) < 0) {
 			perror("write");
+			printf("server_socket: %d\n", server_socket_backup);
 			exit(EXIT_FAILURE);
 		}
 		req->server_bytes_written += n_sent;
 	}
 	req->state = READ_RESPONSE;
 	req->server_bytes_read = 0;
+	req->server_socket = server_socket_backup;
 	struct epoll_event event;
 	event.events = EPOLLIN | EPOLLET;
 	event.data.fd = req->server_socket;
@@ -313,7 +315,6 @@ void handle_client_SEND_REQUEST(struct request_info * req, int epoll_fd) {
 	if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, req->server_socket, &event) < 0) {
 		printf("epoll_ctl error (1):  %s\n", strerror(errno)); fflush(stdout);
 	}
-	// handle_client(req, epoll_fd);
 }
 
 void handle_client_READ_RESPONSE(struct request_info * req, int epoll_fd) {
@@ -345,6 +346,7 @@ void handle_client_READ_RESPONSE(struct request_info * req, int epoll_fd) {
 		req->server_socket = server_socket;
 		req->client_socket = client_socket;
 		req->state = SEND_RESPONSE;
+		req->client_bytes_written = 0;
 		struct epoll_event event;
 		event.events = EPOLLOUT | EPOLLET;
 		event.data.fd = req->client_socket;
@@ -358,20 +360,25 @@ void handle_client_READ_RESPONSE(struct request_info * req, int epoll_fd) {
 
 void handle_client_SEND_RESPONSE(struct request_info * req, int epoll_fd) {
 	int client_socket = req->client_socket;
+	int client_bytes_written = req->client_bytes_written;
 	print_request_info(req);
 	int to_send = req->server_bytes_read, n_sent;
 	printf("to_send: %d\n", to_send);
-	req->client_bytes_written = 0;
-	while (req->client_bytes_written < to_send) {
+	while (client_bytes_written < to_send) {
 		// printf("written: %d\n",req->client_bytes_written);
-		if ((n_sent = write(client_socket, &req->buf[req->client_bytes_written], 1)) < 0) {
+		if ((n_sent = write(client_socket, &req->buf[client_bytes_written], 1)) < 0) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				break;
+			}
 			perror("write");
+			printf("client_socket: %d\n", client_socket);
 			exit(EXIT_FAILURE);
 		}
-		req->client_bytes_written += n_sent;
+		client_bytes_written += n_sent;
 	}
+	req->client_bytes_written = client_bytes_written;
 	printf("client_bytes_written: %d\n", req->client_bytes_written);
-	close(req->client_socket);
+	close(client_socket);
 }
 
 int all_headers_received(char *request) {
