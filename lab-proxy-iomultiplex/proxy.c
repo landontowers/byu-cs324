@@ -34,11 +34,12 @@ void test_parser();
 void print_bytes(unsigned char *, int);
 int open_sfd(int port);
 void handle_new_clients(int epoll_fd, int socket_fd);
-void handle_client(struct request_info * request);
-void handle_client_READ_REQUEST(struct request_info * req);
-void handle_client_SEND_REQUEST(struct request_info * req);
-void handle_client_READ_RESPONSE(struct request_info * req);
-void handle_client_SEND_RESPONSE(struct request_info * req);
+void handle_client(struct request_info * request, int epoll_fd);
+void handle_client_READ_REQUEST(struct request_info * req, int epoll_fd);
+void handle_client_SEND_REQUEST(struct request_info * req, int epoll_fd);
+void handle_client_READ_RESPONSE(struct request_info * req, int epoll_fd);
+void handle_client_SEND_RESPONSE(struct request_info * req, int epoll_fd);
+void print_request_info(struct request_info * req);
 
 enum State { READ_REQUEST, SEND_REQUEST, READ_RESPONSE, SEND_RESPONSE };
 
@@ -63,7 +64,7 @@ int main(int argc, char *argv[])
 	events = calloc(MAXEVENTS, sizeof(event));
 
 	while(1) {
-		int wait_result = epoll_wait(epoll_fd, events, 10, 1000);
+		int wait_result = epoll_wait(epoll_fd, events, MAXEVENTS, 1000);
 		if (wait_result == 0) {
 			continue;
 		} else if (wait_result < 0) {
@@ -82,11 +83,11 @@ int main(int argc, char *argv[])
 					printf("(1) events[%d].data.fd == %d\n", i, events[i].data.fd); 
 				}
 				else if (socket_fd == events[i].data.fd) {
-					printf("New Client\n"); 
+					// printf("New Client\n"); 
 					handle_new_clients(epoll_fd, socket_fd);
 				} else {
-					printf("Existing Client\n");
-					handle_client(events[i].data.ptr);
+					// printf("Existing Client\n");
+					handle_client(events[i].data.ptr, epoll_fd);
 				}
 				fflush(stdout);
 			}
@@ -97,31 +98,31 @@ int main(int argc, char *argv[])
 }
 
 int open_sfd(int port) {
-	int epoll_fd;
+	int socket_fd;
 	struct sockaddr_in ipv4addr;
 	memset(&ipv4addr, 0, sizeof(struct sockaddr_in));
 	ipv4addr.sin_family = AF_INET;
 	ipv4addr.sin_addr.s_addr = INADDR_ANY;
 	ipv4addr.sin_port = htons(port);
 
-	if ((epoll_fd = socket(AF_INET, SOCK_STREAM, 0)) < -1) {
+	if ((socket_fd = socket(AF_INET, SOCK_STREAM, 0)) < -1) {
 		perror("Error creating socket");
 		exit(EXIT_FAILURE);
 	}
 	int optval = 1;
-	setsockopt(epoll_fd, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval));
+	setsockopt(socket_fd, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval));
 
-	fcntl(epoll_fd, F_SETFL, O_NONBLOCK);
+	fcntl(socket_fd, F_SETFL, fcntl(socket_fd, F_GETFL, 0) | O_NONBLOCK);
 
-	if (bind(epoll_fd, (struct sockaddr *)&ipv4addr, sizeof(struct sockaddr)) < 0) {
+	if (bind(socket_fd, (struct sockaddr *)&ipv4addr, sizeof(struct sockaddr)) < 0) {
 		perror("Could not bind");
 		exit(EXIT_FAILURE);
 	}
 
-	listen(epoll_fd, 100);
+	listen(socket_fd, 100);
 	printf("Listening on port %d\n", ntohs(ipv4addr.sin_port)); fflush(stdout);
 
-	return epoll_fd;
+	return socket_fd;
 }
 
 void handle_new_clients(int epoll_fd, int socket_fd) {
@@ -139,7 +140,7 @@ void handle_new_clients(int epoll_fd, int socket_fd) {
 			}
 		}
 
-		if (fcntl(new_fd, F_SETFL, O_NONBLOCK) < 0) {
+		if (fcntl(new_fd, F_SETFL, fcntl(new_fd, F_GETFL, 0) | O_NONBLOCK) < 0) {
 			fprintf(stderr, "error setting socket option\n");
 			exit(1);
 		}
@@ -166,104 +167,188 @@ void handle_new_clients(int epoll_fd, int socket_fd) {
 	}
 }
 
-void handle_client(struct request_info * req) {
+void handle_client(struct request_info * req, int epoll_fd) {
 	switch (req->state) {
 		case READ_REQUEST:
 			printf("READ_REQUEST\n");
-			handle_client_READ_REQUEST(req);
+			handle_client_READ_REQUEST(req, epoll_fd);
 			break;
 		case SEND_REQUEST:
 			printf("SEND_REQUEST\n");
-			handle_client_SEND_REQUEST(req);
+			handle_client_SEND_REQUEST(req, epoll_fd);
 			break;
 		case READ_RESPONSE:
 			printf("READ_RESPONSE\n");
-			handle_client_READ_RESPONSE(req);
+			handle_client_READ_RESPONSE(req, epoll_fd);
 			break;
 		case SEND_RESPONSE:
 			printf("SEND_RESPONSE\n");
-			handle_client_SEND_RESPONSE(req);
+			handle_client_SEND_RESPONSE(req, epoll_fd);
 			break;
 		default:
 			printf("Unknown state: %d\n", req->state); fflush(stdout);
 	}
 }
 
-void handle_client_READ_REQUEST(struct request_info * req) {
-	int n_read = recv(req->client_socket, &req->buf[req->client_bytes_read], MAXLINE, 0);
+void handle_client_READ_REQUEST(struct request_info * req, int epoll_fd) {
+	int n_read;
+	int client_socket_backup = req->client_socket;
 
-	if (n_read == 0) {
-		req->state = SEND_REQUEST;
-		handle_client(req);
-		// close(req->client_socket);
-	} else if (n_read < 0) {
+	while ((n_read = recv(req->client_socket, &req->buf[req->client_bytes_read], MAXLINE, 0)) > 0) {
+		printf("Received %d bytes\n", n_read);
+		req->client_bytes_read += n_read;
+	}
+	if (n_read < 0) {
 		if (errno == EWOULDBLOCK || errno == EAGAIN) {
 			// no more data to be read
+			printf("Try again later...\n");
 		} else {
 			perror("client recv");
 			close(req->client_socket);
 		}
 	} else {
-		printf("Received %d bytes\n", n_read);
-		printf("%s\n", req->buf);
-		req->client_bytes_read += n_read;
-	}
-}
-
-void handle_client_SEND_REQUEST(struct request_info * req) {
-	int server_socket_copy = req->server_socket;
-	char method[16], hostname[64], port[8], path[64], headers[1024];
-	if (parse_request(req->buf, method, hostname, port, path, headers)) {
-		char newRequest[MAX_OBJECT_SIZE];
-		bzero(newRequest, MAX_OBJECT_SIZE);
-		strcat(newRequest, method);
-		strcat(newRequest, path);
-		strcat(newRequest, " HTTP/1.0\r\nHost: ");
-		strcat(newRequest, hostname);
-		if (strcmp(port, "80")) {
-			strcat(newRequest, ":");
-			strcat(newRequest, port);
-		}
-		strcat(newRequest, "\r\nUser-Agent: ");
-		strcat(newRequest, user_agent_hdr);
-		strcat(newRequest, "\r\nConnection: close\r\nProxy-Connection: close\r\n\r\n");
-
-		req->server_bytes_to_write = strlen(newRequest);
-		req->server_bytes_written = 0;
-		req->server_socket = server_socket_copy;
-		int n_sent;
-		while (req->server_bytes_written < req->server_bytes_to_write) {
-			printf("server_socket: %d\n", req->server_socket);
-			printf("server_bytes_written: %d\n", req->server_bytes_written);
-			printf("server_bytes_to_write: %d\n", req->server_bytes_to_write);
-			n_sent = write(req->server_socket, &newRequest[req->server_bytes_written], 1);
-			req->server_bytes_written += n_sent;
-		}
-
-		req->state = READ_RESPONSE;
-		handle_client(req);
-	} else {
-		printf("REQUEST INCOMPLETE:\n%s\n\n", req->buf);
-	}
-
-}
-
-void handle_client_READ_RESPONSE(struct request_info * req) {
-	bzero(req->buf, MAX_OBJECT_SIZE);
-	int n_read;
-	printf("%d\n", req->server_socket);
-	while ((n_read = read(req->server_socket, &req->buf[req->server_bytes_read], MAX_OBJECT_SIZE)) != 0){
-		if (n_read == -1) {
-			perror("read");
+		char method[16], hostname[64], port[8], path[64], headers[1024], newRequest[MAX_OBJECT_SIZE];
+		if (parse_request(req->buf, method, hostname, port, path, headers)) {
+			bzero(newRequest, MAX_OBJECT_SIZE);
+			strcat(newRequest, method);
+			strcat(newRequest, path);
+			strcat(newRequest, " HTTP/1.0\r\nHost: ");
+			strcat(newRequest, hostname);
+			if (strcmp(port, "80")) {
+				strcat(newRequest, ":");
+				strcat(newRequest, port);
+			}
+			strcat(newRequest, "\r\nUser-Agent: ");
+			strcat(newRequest, user_agent_hdr);
+			strcat(newRequest, "\r\nConnection: close\r\nProxy-Connection: close\r\n\r\n");
+		} else {
+			printf("REQUEST INCOMPLETE:\n%s\n\n", req->buf);
 			exit(EXIT_FAILURE);
 		}
-		req->server_bytes_read += n_read;
+		sprintf(req->buf, "%s", newRequest);
+
+		struct addrinfo hints;
+		struct addrinfo *result, *rp;
+		int s, sfd2;
+		memset(&hints, 0, sizeof(struct addrinfo));
+		hints.ai_family = AF_INET;
+		hints.ai_socktype = SOCK_STREAM;
+
+		if ((s=getaddrinfo(hostname, port, &hints, &result)) != 0) {
+			fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
+			exit(EXIT_FAILURE);
+		}
+
+		for (rp = result; rp != NULL; rp = rp->ai_next) {
+			sfd2 = socket(AF_INET, SOCK_STREAM, 0);
+			if (sfd2 == -1)
+				continue;
+			if (connect(sfd2, rp->ai_addr, rp->ai_addrlen) != -1)
+				break;
+			close(sfd2);
+		}
+
+		if (rp == NULL) {   /* No address succeeded */
+			fprintf(stderr, "Could not connect\n");
+			exit(EXIT_FAILURE);
+		}
+
+		freeaddrinfo(result);
+
+		fcntl(sfd2, F_SETFL, fcntl(sfd2, F_GETFL, 0) | O_NONBLOCK);
+
+		req->server_bytes_to_write = (int) strlen(newRequest);
+		req->state = SEND_REQUEST;
+		req->server_socket = sfd2;
+		req->server_bytes_written = 0;
+		req->client_socket = client_socket_backup;
+
+		struct epoll_event event;
+		event.events = EPOLLOUT | EPOLLET;
+		event.data.fd = sfd2;
+		event.data.ptr = req;
+		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sfd2, &event) < 0) {
+			printf("epoll_ctl error (1):  %s\n", strerror(errno)); fflush(stdout);
+		}
 	}
-	handle_client(req);
 }
 
-void handle_client_SEND_RESPONSE(struct request_info * req) {
+void handle_client_SEND_REQUEST(struct request_info * req, int epoll_fd) {
+	int n_sent;
+	while (req->server_bytes_written < req->server_bytes_to_write) {
+		if ((n_sent = write(req->server_socket, &req->buf[req->server_bytes_written], 1)) < 0) {
+			perror("write");
+			exit(EXIT_FAILURE);
+		}
+		req->server_bytes_written += n_sent;
+	}
+	req->state = READ_RESPONSE;
+	req->server_bytes_read = 0;
+	struct epoll_event event;
+	event.events = EPOLLIN | EPOLLET;
+	event.data.fd = req->server_socket;
+	event.data.ptr = req;
+	if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, req->server_socket, &event) < 0) {
+		printf("epoll_ctl error (1):  %s\n", strerror(errno)); fflush(stdout);
+	}
+	// handle_client(req, epoll_fd);
+}
 
+void handle_client_READ_RESPONSE(struct request_info * req, int epoll_fd) {
+	int server_socket = req->server_socket;
+	int client_socket = req->client_socket;
+	int server_bytes_read = req->server_bytes_read;
+	int state = req->state;
+
+	int n_read;
+	while ((n_read = read(server_socket, &req->buf[server_bytes_read], MAX_OBJECT_SIZE)) != 0){
+		if (n_read == -1) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				break;
+			} else {
+				perror("read");
+				exit(EXIT_FAILURE);
+			}
+		}
+		server_bytes_read += n_read;
+		req->server_socket = server_socket;
+		req->client_socket = client_socket;
+		req->server_bytes_read = server_bytes_read;
+		req->state = state;
+		// print_request_info(req);
+	}
+	printf("server_bytes_read: %d\n", server_bytes_read);
+	if (n_read == 0) {
+		// print_request_info(req);
+		req->server_socket = server_socket;
+		req->client_socket = client_socket;
+		req->state = SEND_RESPONSE;
+		struct epoll_event event;
+		event.events = EPOLLOUT | EPOLLET;
+		event.data.fd = req->client_socket;
+		event.data.ptr = req;
+		if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, req->client_socket, &event) < 0) {
+			printf("epoll_ctl error (1):  %s\n", strerror(errno)); fflush(stdout);
+		}
+	}
+}
+
+void handle_client_SEND_RESPONSE(struct request_info * req, int epoll_fd) {
+	int client_socket = req->client_socket;
+	print_request_info(req);
+	int to_send = strlen(req->buf)+1, n_sent;
+	printf("to_send: %d\n", to_send);
+	req->client_bytes_written = 0;
+	while (req->client_bytes_written < to_send) {
+		printf("client socket: %d\n", client_socket);
+		printf("written: %d\n",req->client_bytes_written);
+		if ((n_sent = write(client_socket, &req->buf[req->client_bytes_written], 1)) < 0) {
+			perror("write");
+			exit(EXIT_FAILURE);
+		}
+		req->client_bytes_written += n_sent;
+	}
+	printf("client_bytes_written: %d\n", req->client_bytes_written);
 }
 
 int all_headers_received(char *request) {
@@ -413,4 +498,18 @@ void print_bytes(unsigned char *bytes, int byteslen) {
 		}
 	}
 	printf("\n");
+}
+
+void print_request_info(struct request_info * req) {
+	printf("\n");
+	printf("CLIENT_SOCKET: %d\n", req->client_socket);
+	printf("SERVER_SOCKET: %d\n", req->server_socket);
+	printf("STATE: %d\n", req->state);
+	printf("CLIENT_BYTES_READ: %d\n", req->client_bytes_read);
+	printf("CLIENT_BYTES_WRITTEN: %d\n", req->client_bytes_written);
+	printf("SERVER_BYTES_TO_WRITE: %d\n", req->server_bytes_to_write);
+	printf("SERVER_BYTES_WRITTEN: %d\n", req->server_bytes_written);
+	printf("SERVER_BYTES_READ: %d\n", req->server_bytes_read);
+	printf("BUF:\n%s\n", req->buf);
+	fflush(stdout);
 }
