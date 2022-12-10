@@ -162,17 +162,17 @@ void handle_new_clients(int epoll_fd, int socket_fd) {
 
 		struct epoll_event event;
 		event.events = EPOLLIN | EPOLLET;
-		request_info req_info = {
-			.client_socket = new_fd,
-			.server_socket = socket_fd,
-			.state = READ_REQUEST,
-			.client_bytes_read = 0,
-			.client_bytes_written = 0,
-			.server_bytes_to_write = 0,
-			.server_bytes_written = 0,
-			.server_bytes_read = 0
-		};
-		event.data.ptr = &req_info;
+		struct request_info * req_info = (request_info*) malloc(sizeof(int)*8 + MAX_OBJECT_SIZE);
+		req_info->client_socket = new_fd;
+		req_info->server_socket = socket_fd;
+		req_info->state = READ_REQUEST;
+		req_info->client_bytes_read = 0;
+		req_info->client_bytes_written = 0;
+		req_info->server_bytes_to_write = 0;
+		req_info->server_bytes_written = 0;
+		req_info->server_bytes_read = 0;
+		memset(req_info->buf, 0, MAX_OBJECT_SIZE);
+		event.data.ptr = req_info;
 
 		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_fd, &event) < 0) {
 			printf("epoll_ctl error (2):  %s\n", strerror(errno)); fflush(stdout);
